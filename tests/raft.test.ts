@@ -510,4 +510,63 @@ describe('RaftNode', () => {
       node.stop();
     });
   });
+
+  describe('Peer Management', () => {
+    it('should add peer', () => {
+      const node = createTestNode();
+      node.start();
+
+      node.addPeer('node-2', '100.0.0.2:50051', true);
+
+      const peers = node.getPeers();
+      expect(peers).toHaveLength(1);
+      expect(peers[0].nodeId).toBe('node-2');
+      expect(peers[0].address).toBe('100.0.0.2:50051');
+      expect(peers[0].votingMember).toBe(true);
+
+      node.stop();
+    });
+
+    it('should not add self as peer', () => {
+      const node = createTestNode({ nodeId: 'node-1' });
+      node.start();
+
+      node.addPeer('node-1', '100.0.0.1:50051', true);
+
+      const peers = node.getPeers();
+      expect(peers).toHaveLength(0);
+
+      node.stop();
+    });
+
+    it('should remove peer', () => {
+      const node = createTestNode();
+      node.start();
+
+      node.addPeer('node-2', '100.0.0.2:50051', true);
+      node.addPeer('node-3', '100.0.0.3:50051', true);
+
+      expect(node.getPeers()).toHaveLength(2);
+
+      node.removePeer('node-2');
+
+      const peers = node.getPeers();
+      expect(peers).toHaveLength(1);
+      expect(peers[0].nodeId).toBe('node-3');
+
+      node.stop();
+    });
+
+    it('should support non-voting members', () => {
+      const node = createTestNode();
+      node.start();
+
+      node.addPeer('node-2', '100.0.0.2:50051', false);
+
+      const peers = node.getPeers();
+      expect(peers[0].votingMember).toBe(false);
+
+      node.stop();
+    });
+  });
 });
