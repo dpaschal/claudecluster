@@ -1,0 +1,27 @@
+[Unit]
+Description=Claude Cluster - P2P Compute Mesh
+After=network.target tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+Type=simple
+User=paschal
+WorkingDirectory=/home/paschal/claudecluster
+ExecStart=/usr/bin/node /home/paschal/claudecluster/dist/index.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment=NODE_ENV=production
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/paschal/.claudecluster
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
