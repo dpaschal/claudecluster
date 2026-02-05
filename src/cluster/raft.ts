@@ -62,6 +62,7 @@ export class RaftNode extends EventEmitter {
   private maxEntriesPerAppend: number;
 
   private running = false;
+  private electionsPaused = false;  // When true, don't start election timers
 
   constructor(config: RaftConfig) {
     super();
@@ -448,6 +449,13 @@ export class RaftNode extends EventEmitter {
   // Timer management
   private resetElectionTimeout(): void {
     this.clearElectionTimeout();
+
+    // Don't start election timer if elections are paused (during cluster join)
+    if (this.electionsPaused) {
+      this.config.logger.debug('Elections paused, not starting election timer');
+      return;
+    }
+
     const timeout = this.electionTimeoutMin +
       Math.random() * (this.electionTimeoutMax - this.electionTimeoutMin);
 
@@ -456,6 +464,35 @@ export class RaftNode extends EventEmitter {
         this.becomeCandidate();
       }
     }, timeout);
+  }
+
+  /**
+   * Pause elections during cluster join to prevent split-brain.
+   * Call this before attempting to join an existing cluster.
+   */
+  pauseElections(): void {
+    this.electionsPaused = true;
+    this.clearElectionTimeout();
+    this.config.logger.info('Elections paused (joining cluster)');
+  }
+
+  /**
+   * Resume elections after cluster join completes (success or failure).
+   * If join failed, this allows the node to hold elections and potentially become leader.
+   */
+  resumeElections(): void {
+    this.electionsPaused = false;
+    if (this.running && this.state !== 'leader') {
+      this.resetElectionTimeout();
+    }
+    this.config.logger.info('Elections resumed');
+  }
+
+  /**
+   * Check if elections are currently paused.
+   */
+  areElectionsPaused(): boolean {
+    return this.electionsPaused;
   }
 
   private clearElectionTimeout(): void {

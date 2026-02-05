@@ -546,7 +546,8 @@ export class ClaudeCluster extends EventEmitter {
 
     await this.grpcServer!.start();
 
-    // Start Raft
+    // Start Raft with elections paused to prevent split-brain during join
+    this.raft!.pauseElections();
     this.raft!.start();
 
     // Start membership
@@ -563,7 +564,14 @@ export class ClaudeCluster extends EventEmitter {
 
     // Try to join existing cluster with retries
     const joined = await this.joinClusterWithRetry();
+
+    // Resume elections now that join phase is complete
+    // If we joined, leader heartbeats will keep resetting our election timer
+    // If we didn't join, we can become leader of a new cluster
+    this.raft!.resumeElections();
+
     if (joined) {
+      this.logger.info('Successfully joined existing cluster');
       return;
     }
 
