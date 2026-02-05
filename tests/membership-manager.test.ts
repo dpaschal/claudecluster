@@ -262,4 +262,59 @@ describe('MembershipManager', () => {
       expect(events[0].nodeId).toBe('new-node');
     });
   });
+
+  describe('Approve Node', () => {
+    const createPendingNode = (): NodeInfo => ({
+      nodeId: 'new-node',
+      hostname: 'new-host',
+      tailscaleIp: '100.0.0.3',
+      grpcPort: 50051,
+      role: 'follower',
+      status: 'pending_approval',
+      resources: null,
+      tags: ['test'],
+      joinedAt: Date.now(),
+      lastSeen: Date.now(),
+    });
+
+    it('should return false when not leader', async () => {
+      const { manager, mockRaft } = createTestManager();
+      mockRaft.isLeader.mockReturnValue(false);
+
+      const result = await manager.approveNode(createPendingNode());
+
+      expect(result).toBe(false);
+      expect(mockRaft.appendEntry).not.toHaveBeenCalled();
+    });
+
+    it('should call raft.appendEntry with node_join type and node data', async () => {
+      const { manager, mockRaft } = createTestManager();
+      mockRaft.isLeader.mockReturnValue(true);
+
+      const node = createPendingNode();
+      await manager.approveNode(node);
+
+      expect(mockRaft.appendEntry).toHaveBeenCalledWith(
+        'node_join',
+        expect.any(Buffer)
+      );
+
+      const callData = JSON.parse(mockRaft.appendEntry.mock.calls[0][1].toString());
+      expect(callData.nodeId).toBe('new-node');
+      expect(callData.hostname).toBe('new-host');
+    });
+
+    it('should remove from pendingApprovals on success', async () => {
+      const { manager, mockRaft } = createTestManager({ autoApprove: false });
+      mockRaft.isLeader.mockReturnValue(true);
+
+      const node = createPendingNode();
+      await manager.handleJoinRequest(node);
+      expect(manager.getPendingApprovals()).toHaveLength(1);
+
+      await manager.approveNode(node);
+
+      expect(manager.getPendingApprovals()).toHaveLength(0);
+    });
+  });
 });
