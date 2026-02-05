@@ -569,4 +569,62 @@ describe('RaftNode', () => {
       node.stop();
     });
   });
+
+  describe('Leader Election', () => {
+    it('should become leader with no peers (single node cluster)', async () => {
+      const node = createTestNode();
+      node.start();
+
+      // Trigger election - use async version to allow election promise to resolve
+      await vi.advanceTimersByTimeAsync(301);
+
+      // With no peers, node needs only its own vote (1 of 1)
+      expect(node.getState()).toBe('leader');
+      expect(node.isLeader()).toBe(true);
+      expect(node.getLeaderId()).toBe('node-1');
+
+      node.stop();
+    });
+
+    it('should emit leaderElected when becoming leader', async () => {
+      const node = createTestNode();
+      let electedLeaderId: string | null = null;
+
+      node.on('leaderElected', (leaderId: string) => {
+        electedLeaderId = leaderId;
+      });
+
+      node.start();
+      await vi.advanceTimersByTimeAsync(301);
+
+      expect(electedLeaderId).toBe('node-1');
+
+      node.stop();
+    });
+
+    it('should clear leaderId when becoming candidate', () => {
+      const node = createTestNode();
+      node.start();
+
+      // Set leader via AppendEntries
+      node.handleAppendEntries({
+        term: 1,
+        leaderId: 'node-leader',
+        prevLogIndex: 0,
+        prevLogTerm: 0,
+        entries: [],
+        leaderCommit: 0,
+      });
+
+      expect(node.getLeaderId()).toBe('node-leader');
+
+      // Trigger election - sync version is fine here since we only check candidate state
+      vi.advanceTimersByTime(301);
+
+      // As candidate, leader is unknown (before async election completes)
+      expect(node.getLeaderId()).toBeNull();
+
+      node.stop();
+    });
+  });
 });
