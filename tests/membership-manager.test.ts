@@ -317,4 +317,131 @@ describe('MembershipManager', () => {
       expect(manager.getPendingApprovals()).toHaveLength(0);
     });
   });
+
+  describe('Heartbeat', () => {
+    it('should not send heartbeat when node is leader', async () => {
+      const { manager, mockRaft } = createTestManager();
+      mockRaft.isLeader.mockReturnValue(true);
+
+      const mockHeartbeat = vi.fn().mockResolvedValue({ acknowledged: true });
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        heartbeat: mockHeartbeat,
+      }));
+
+      manager.start();
+      vi.advanceTimersByTime(5000);
+      manager.stop();
+
+      expect(mockHeartbeat).not.toHaveBeenCalled();
+    });
+
+    it('should not send heartbeat when no leader address known', async () => {
+      const { manager, mockRaft } = createTestManager();
+      mockRaft.isLeader.mockReturnValue(false);
+      // No leader address set
+
+      const mockHeartbeat = vi.fn().mockResolvedValue({ acknowledged: true });
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        heartbeat: mockHeartbeat,
+      }));
+
+      manager.start();
+      vi.advanceTimersByTime(5000);
+      manager.stop();
+
+      expect(mockHeartbeat).not.toHaveBeenCalled();
+    });
+
+    it('should call client.heartbeat with node_id', async () => {
+      const { manager, mockRaft } = createTestManager();
+      mockRaft.isLeader.mockReturnValue(false);
+
+      // Simulate having joined a cluster
+      const mockRegisterNode = vi.fn().mockResolvedValue({
+        approved: true,
+        pending_approval: false,
+        cluster_id: 'cluster-1',
+        leader_address: '100.0.0.2:50051',
+        peers: [],
+      });
+      const mockHeartbeat = vi.fn().mockResolvedValue({
+        acknowledged: true,
+        leader_address: '100.0.0.2:50051',
+      });
+
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        registerNode: mockRegisterNode,
+        heartbeat: mockHeartbeat,
+      }));
+
+      await manager.joinCluster('100.0.0.2:50051');
+      manager.start();
+      vi.advanceTimersByTime(5000);
+      manager.stop();
+
+      expect(mockHeartbeat).toHaveBeenCalledWith(
+        expect.objectContaining({ node_id: 'node-1' })
+      );
+    });
+
+    it('should update lastSeen on acknowledged heartbeat', async () => {
+      const { manager, mockRaft } = createTestManager();
+      mockRaft.isLeader.mockReturnValue(false);
+
+      const mockRegisterNode = vi.fn().mockResolvedValue({
+        approved: true,
+        pending_approval: false,
+        cluster_id: 'cluster-1',
+        leader_address: '100.0.0.2:50051',
+        peers: [],
+      });
+      const mockHeartbeat = vi.fn().mockResolvedValue({
+        acknowledged: true,
+        leader_address: '100.0.0.2:50051',
+      });
+
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        registerNode: mockRegisterNode,
+        heartbeat: mockHeartbeat,
+      }));
+
+      await manager.joinCluster('100.0.0.2:50051');
+
+      const beforeHeartbeat = manager.getSelfNode().lastSeen;
+
+      manager.start();
+      // Advance time to trigger heartbeat and allow async callback to complete
+      await vi.advanceTimersByTimeAsync(5000);
+      manager.stop();
+
+      expect(manager.getSelfNode().lastSeen).toBeGreaterThan(beforeHeartbeat);
+    });
+
+    it('should handle heartbeat failure gracefully', async () => {
+      const { manager, mockRaft } = createTestManager();
+      mockRaft.isLeader.mockReturnValue(false);
+
+      const mockRegisterNode = vi.fn().mockResolvedValue({
+        approved: true,
+        pending_approval: false,
+        cluster_id: 'cluster-1',
+        leader_address: '100.0.0.2:50051',
+        peers: [],
+      });
+      const mockHeartbeat = vi.fn().mockRejectedValue(new Error('Network error'));
+
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        registerNode: mockRegisterNode,
+        heartbeat: mockHeartbeat,
+      }));
+
+      await manager.joinCluster('100.0.0.2:50051');
+      manager.start();
+
+      // Should not throw
+      expect(() => vi.advanceTimersByTime(5000)).not.toThrow();
+
+      manager.stop();
+    });
+  });
 });
