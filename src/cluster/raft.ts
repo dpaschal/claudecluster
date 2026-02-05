@@ -459,10 +459,10 @@ export class RaftNode extends EventEmitter {
     const timeout = this.electionTimeoutMin +
       Math.random() * (this.electionTimeoutMax - this.electionTimeoutMin);
 
-    this.config.logger.debug('Setting election timeout', { timeoutMs: Math.round(timeout), running: this.running, state: this.state });
+    this.config.logger.info('Setting election timeout', { timeoutMs: Math.round(timeout), running: this.running, state: this.state });
 
     this.electionTimeout = setTimeout(() => {
-      this.config.logger.debug('Election timeout fired', { running: this.running, state: this.state });
+      this.config.logger.info('Election timeout fired', { running: this.running, state: this.state });
       if (this.running && this.state !== 'leader') {
         this.becomeCandidate();
       }
@@ -485,6 +485,7 @@ export class RaftNode extends EventEmitter {
    */
   resumeElections(): void {
     this.electionsPaused = false;
+    this.config.logger.info('Resuming elections', { running: this.running, state: this.state });
     if (this.running && this.state !== 'leader') {
       this.resetElectionTimeout();
     }
