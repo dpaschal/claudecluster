@@ -95,4 +95,103 @@ describe('RaftNode', () => {
       node.stop();
     });
   });
+
+  describe('State Transitions', () => {
+    it('should become candidate after election timeout', () => {
+      const node = createTestNode();
+      node.start();
+
+      expect(node.getState()).toBe('follower');
+
+      // Advance past max election timeout
+      vi.advanceTimersByTime(301);
+
+      expect(node.getState()).toBe('candidate');
+
+      node.stop();
+    });
+
+    it('should increment term when becoming candidate', () => {
+      const node = createTestNode();
+      node.start();
+
+      const initialTerm = node.getCurrentTerm();
+
+      vi.advanceTimersByTime(301);
+
+      expect(node.getCurrentTerm()).toBe(initialTerm + 1);
+
+      node.stop();
+    });
+
+    it('should emit stateChange event on transition', () => {
+      const node = createTestNode();
+      const stateChanges: Array<{ state: RaftState; term: number }> = [];
+
+      node.on('stateChange', (state: RaftState, term: number) => {
+        stateChanges.push({ state, term });
+      });
+
+      node.start();
+
+      // First transition: become follower on start
+      expect(stateChanges).toContainEqual({ state: 'follower', term: 0 });
+
+      vi.advanceTimersByTime(301);
+
+      // Second transition: become candidate
+      expect(stateChanges).toContainEqual({ state: 'candidate', term: 1 });
+
+      node.stop();
+    });
+
+    it('should become follower on higher term', () => {
+      const node = createTestNode();
+      node.start();
+
+      // Force to candidate
+      vi.advanceTimersByTime(301);
+      expect(node.getState()).toBe('candidate');
+
+      // Receive AppendEntries with higher term
+      node.handleAppendEntries({
+        term: 5,
+        leaderId: 'node-2',
+        prevLogIndex: 0,
+        prevLogTerm: 0,
+        entries: [],
+        leaderCommit: 0,
+      });
+
+      expect(node.getState()).toBe('follower');
+      expect(node.getCurrentTerm()).toBe(5);
+
+      node.stop();
+    });
+
+    it('should reset election timeout on valid AppendEntries', () => {
+      const node = createTestNode();
+      node.start();
+
+      // Advance part way to election timeout
+      vi.advanceTimersByTime(100);
+
+      // Receive heartbeat from leader
+      node.handleAppendEntries({
+        term: 0,
+        leaderId: 'node-2',
+        prevLogIndex: 0,
+        prevLogTerm: 0,
+        entries: [],
+        leaderCommit: 0,
+      });
+
+      // Advance more - should not trigger election yet
+      vi.advanceTimersByTime(200);
+
+      expect(node.getState()).toBe('follower');
+
+      node.stop();
+    });
+  });
 });
