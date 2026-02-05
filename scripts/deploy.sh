@@ -151,8 +151,22 @@ EOF
 
 # Main deployment logic
 main() {
-    local target_node=${1:-""}
-    local skip_confirm=${2:-""}
+    local target_node=""
+    local skip_confirm=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -y|--yes)
+                skip_confirm="-y"
+                shift
+                ;;
+            *)
+                target_node="$1"
+                shift
+                ;;
+        esac
+    done
 
     show_banner
     log_info "Current node: ${CYAN}$CURRENT_NODE${NC}"
