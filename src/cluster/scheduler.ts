@@ -215,6 +215,17 @@ export class TaskScheduler extends EventEmitter {
       return { accepted: false, taskId: spec.taskId, reason: 'No leader available' };
     }
 
+    // Check if we're trying to forward to ourselves (would cause infinite loop)
+    const selfNode = this.config.membership.getSelfNode();
+    const selfAddress = `${selfNode.tailscaleIp}:${selfNode.grpcPort}`;
+    if (leaderAddress === selfAddress) {
+      this.config.logger.warn('Leader address points to self but we are not leader - cluster may be unstable', {
+        taskId: spec.taskId,
+        leaderAddress,
+      });
+      return { accepted: false, taskId: spec.taskId, reason: 'Cluster leader not available (self-reference)' };
+    }
+
     this.config.logger.info('Forwarding task to leader', {
       taskId: spec.taskId,
       leader: leaderAddress,
