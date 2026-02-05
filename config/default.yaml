@@ -1,0 +1,136 @@
+# Claude Cluster Configuration
+# Default configuration file
+
+cluster:
+  # Unique identifier for this cluster
+  id: claudecluster-default
+
+  # Auto-approve new nodes with these tags
+  autoApproveTags:
+    - tag:claudecluster-trusted
+
+  # Auto-approve ephemeral (PXE-booted) nodes
+  autoApproveEphemeral: false
+
+node:
+  # gRPC server port
+  grpcPort: 50051
+
+  # Node role: leader-eligible or worker
+  # leader-eligible nodes participate in Raft consensus
+  # worker nodes only execute tasks
+  role: leader-eligible
+
+  # Tags for this node
+  tags: []
+
+network:
+  # Tailscale tag for cluster discovery
+  tailscaleTag: claudecluster
+
+  # Discovery poll interval
+  discoveryIntervalMs: 30000
+
+raft:
+  # Election timeout range (randomized within this range)
+  electionTimeoutMinMs: 150
+  electionTimeoutMaxMs: 300
+
+  # Heartbeat interval
+  heartbeatIntervalMs: 50
+
+  # Maximum log entries per AppendEntries RPC
+  maxLogEntriesPerAppend: 100
+
+scheduler:
+  # Maximum tasks in queue
+  maxQueueSize: 1000
+
+  # Maximum retry attempts for failed tasks
+  maxRetries: 3
+
+  # Scheduling interval
+  schedulingIntervalMs: 1000
+
+resources:
+  # Resource monitoring poll interval
+  pollIntervalMs: 5000
+
+  # Gaming detection settings
+  gaming:
+    # Process names that indicate gaming activity
+    processes:
+      - steam
+      - steamwebhelper
+      - wine
+      - wine64
+      - wineserver
+      - proton
+      - pressure-vessel
+      - gamescope
+      - gamemode
+      - lutris
+      - heroic
+
+    # GPU utilization threshold for gaming detection
+    gpuThreshold: 70
+
+    # Cooldown after gaming stops before resuming GPU tasks
+    cooldownMs: 30000
+
+health:
+  # Health check interval
+  checkIntervalMs: 10000
+
+  # Resource thresholds for health warnings
+  thresholds:
+    memoryPercent: 90
+    cpuPercent: 95
+    diskPercent: 95
+
+kubernetes:
+  # Path to kubeconfig file (null for default location)
+  kubeconfigPath: null
+
+  # Default namespace for jobs
+  defaultNamespace: default
+
+  # TTL for completed jobs
+  jobTtlSeconds: 3600
+
+security:
+  # Directory for certificates
+  certsDir: ~/.claudecluster/certs
+
+  # Directory for secrets
+  secretsDir: ~/.claudecluster/secrets
+
+  # Enable mTLS for gRPC
+  enableMtls: false
+
+  # Approval request timeout
+  approvalTimeoutMs: 300000  # 5 minutes
+
+logging:
+  # Log level: error, warn, info, debug
+  level: info
+
+  # Log format: json or simple
+  format: simple
+
+  # Log file (null for stdout only)
+  file: null
+
+mcp:
+  # MCP server settings
+  serverName: claudecluster
+  serverVersion: "0.1.0"
+
+# Initial seed nodes for joining an existing cluster
+# Leave empty to start a new cluster
+seeds: []
+
+# Example seed configuration:
+# seeds:
+#   - address: 100.104.78.123:50051  # rog2
+#   - address: 100.85.203.53:50051   # terminus

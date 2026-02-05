@@ -1,0 +1,56 @@
+{
+  "name": "claudecluster",
+  "version": "0.1.0",
+  "description": "Peer-to-peer compute mesh for Claude sessions with distributed task execution and GPU sharing",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "claudecluster": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "npm run proto:generate && tsc",
+    "proto:generate": "proto-loader-gen-types --longs=String --enums=String --defaults --oneofs --grpcLib=@grpc/grpc-js --outDir=src/generated proto/*.proto",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src/**/*.ts",
+    "clean": "rm -rf dist src/generated"
+  },
+  "keywords": [
+    "claude",
+    "distributed",
+    "cluster",
+    "mcp",
+    "kubernetes",
+    "grpc"
+  ],
+  "author": "dpaschal",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.com/dpaschal/claudecluster.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.0",
+    "@grpc/proto-loader": "^0.7.0",
+    "@kubernetes/client-node": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "dockerode": "^4.0.0",
+    "systeminformation": "^6.0.0",
+    "winston": "^4.0.0",
+    "yaml": "^2.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
