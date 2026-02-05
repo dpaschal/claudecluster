@@ -95,4 +95,111 @@ describe('MembershipManager', () => {
       expect(manager.getSelfNode().role).toBe('follower');
     });
   });
+
+  describe('Join Cluster', () => {
+    it('should call registerNode on seed address', async () => {
+      const { manager } = createTestManager();
+      const mockRegisterNode = vi.fn().mockResolvedValue({
+        approved: true,
+        pending_approval: false,
+        cluster_id: 'cluster-1',
+        leader_address: '100.0.0.2:50051',
+        peers: [],
+      });
+
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        registerNode: mockRegisterNode,
+      }));
+
+      await manager.joinCluster('100.0.0.2:50051');
+
+      expect(ClusterClient).toHaveBeenCalledWith(expect.anything(), '100.0.0.2:50051');
+      expect(mockRegisterNode).toHaveBeenCalled();
+    });
+
+    it('should set status to pending_approval when response.pending_approval', async () => {
+      const { manager } = createTestManager();
+      const mockRegisterNode = vi.fn().mockResolvedValue({
+        approved: false,
+        pending_approval: true,
+        cluster_id: '',
+        leader_address: '100.0.0.2:50051',
+        peers: [],
+      });
+
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        registerNode: mockRegisterNode,
+      }));
+
+      const result = await manager.joinCluster('100.0.0.2:50051');
+
+      expect(result).toBe(true);
+      expect(manager.getSelfNode().status).toBe('pending_approval');
+    });
+
+    it('should set status to active and store leader address when approved', async () => {
+      const { manager } = createTestManager();
+      const mockRegisterNode = vi.fn().mockResolvedValue({
+        approved: true,
+        pending_approval: false,
+        cluster_id: 'cluster-1',
+        leader_address: '100.0.0.2:50051',
+        peers: [],
+      });
+
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        registerNode: mockRegisterNode,
+      }));
+
+      const result = await manager.joinCluster('100.0.0.2:50051');
+
+      expect(result).toBe(true);
+      expect(manager.getSelfNode().status).toBe('active');
+      expect(manager.getLeaderAddress()).toBe('100.0.0.2:50051');
+    });
+
+    it('should add Raft peers for each returned peer', async () => {
+      const { manager, mockRaft } = createTestManager();
+      const mockRegisterNode = vi.fn().mockResolvedValue({
+        approved: true,
+        pending_approval: false,
+        cluster_id: 'cluster-1',
+        leader_address: '100.0.0.2:50051',
+        peers: [
+          {
+            node_id: 'node-2',
+            hostname: 'peer-host',
+            tailscale_ip: '100.0.0.2',
+            grpc_port: 50051,
+            role: 'NODE_ROLE_LEADER',
+            status: 'NODE_STATUS_ACTIVE',
+            tags: [],
+            joined_at: '1000',
+            last_seen: '1000',
+          },
+        ],
+      });
+
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        registerNode: mockRegisterNode,
+      }));
+
+      await manager.joinCluster('100.0.0.2:50051');
+
+      expect(mockRaft.addPeer).toHaveBeenCalledWith('node-2', '100.0.0.2:50051', true);
+      expect(manager.getNode('node-2')).toBeDefined();
+    });
+
+    it('should return false on network error', async () => {
+      const { manager } = createTestManager();
+
+      (ClusterClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        registerNode: vi.fn().mockRejectedValue(new Error('Connection refused')),
+      }));
+
+      const result = await manager.joinCluster('100.0.0.2:50051');
+
+      expect(result).toBe(false);
+    });
+  });
 });
