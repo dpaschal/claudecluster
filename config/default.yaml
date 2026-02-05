@@ -5,12 +5,15 @@ cluster:
   # Unique identifier for this cluster
   id: claudecluster-default
 
+  # Auto-approve ALL new nodes (for development/testing)
+  autoApprove: true
+
   # Auto-approve new nodes with these tags
   autoApproveTags:
     - tag:claudecluster-trusted
 
   # Auto-approve ephemeral (PXE-booted) nodes
-  autoApproveEphemeral: false
+  autoApproveEphemeral: true
 
 node:
   # gRPC server port
@@ -33,11 +36,11 @@ network:
 
 raft:
   # Election timeout range (randomized within this range)
-  electionTimeoutMinMs: 150
-  electionTimeoutMaxMs: 300
+  electionTimeoutMinMs: 1500
+  electionTimeoutMaxMs: 3000
 
   # Heartbeat interval
-  heartbeatIntervalMs: 50
+  heartbeatIntervalMs: 500
 
   # Maximum log entries per AppendEntries RPC
   maxLogEntriesPerAppend: 100

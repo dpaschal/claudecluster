@@ -22,6 +22,7 @@ import { ClusterMcpServer } from './mcp/server.js';
 import { AuthManager, AuthzManager } from './security/auth.js';
 import { SecretsManager } from './security/secrets.js';
 import { ClusterAnnouncer } from './cluster/announcements.js';
+import { createClusterServiceHandlers, createRaftServiceHandlers, createAgentServiceHandlers } from './grpc/handlers.js';
 import { Command } from 'commander';
 import { randomUUID } from 'crypto';
 
@@ -33,6 +34,7 @@ export interface ClusterModeOptions {
 export interface ClusterConfig {
   cluster: {
     id: string;
+    autoApprove?: boolean;
     autoApproveTags?: string[];
     autoApproveEphemeral?: boolean;
   };
@@ -367,7 +369,7 @@ export class ClaudeCluster extends EventEmitter {
       logger: this.logger,
       raft: this.raft,
       clientPool: this.clientPool!,
-      autoApprove: this.config.cluster.autoApproveEphemeral,
+      autoApprove: this.config.cluster.autoApprove ?? this.config.cluster.autoApproveEphemeral,
     });
 
     // Cluster state manager
@@ -494,10 +496,22 @@ export class ClaudeCluster extends EventEmitter {
   }
 
   private async joinOrCreateCluster(): Promise<void> {
-    // Register gRPC services
+    // Register gRPC services with actual handlers
+    const handlerConfig = {
+      logger: this.logger,
+      nodeId: this.nodeId,
+      membership: this.membership!,
+      raft: this.raft!,
+      scheduler: this.scheduler!,
+      stateManager: this.stateManager!,
+      taskExecutor: this.taskExecutor!,
+      resourceMonitor: this.resourceMonitor!,
+    };
+
     this.grpcServer!.registerServices({
-      // Services would be implemented here
-      // For now, using placeholders
+      clusterService: createClusterServiceHandlers(handlerConfig),
+      raftService: createRaftServiceHandlers(handlerConfig),
+      agentService: createAgentServiceHandlers(handlerConfig),
     });
 
     await this.grpcServer!.start();
