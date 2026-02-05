@@ -329,6 +329,11 @@ export class MembershipManager extends EventEmitter {
 
   // Handle committed Raft entries
   private handleCommittedEntry(entry: { type: LogEntryType; data: Buffer }): void {
+    // Skip noop entries - they're used for leader election confirmation
+    if (entry.type === 'noop') {
+      return;
+    }
+
     try {
       const data = JSON.parse(entry.data.toString());
 
@@ -338,6 +343,9 @@ export class MembershipManager extends EventEmitter {
           break;
         case 'node_leave':
           this.handleNodeLeaveCommitted(data);
+          break;
+        default:
+          // Ignore other entry types we don't handle
           break;
       }
     } catch (error) {
