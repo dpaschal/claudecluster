@@ -1,0 +1,98 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { MembershipManager, MembershipConfig, NodeInfo, NodeResources } from '../src/cluster/membership.js';
+import { RaftNode } from '../src/cluster/raft.js';
+import { GrpcClientPool, ClusterClient } from '../src/grpc/client.js';
+import { Logger } from 'winston';
+
+// Mock the gRPC client module
+vi.mock('../src/grpc/client.js', () => ({
+  ClusterClient: vi.fn(),
+  GrpcClientPool: vi.fn(),
+}));
+
+// Mock logger
+const createMockLogger = (): Logger => ({
+  info: vi.fn(),
+  debug: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+} as unknown as Logger);
+
+// Mock RaftNode with event capture
+const createMockRaft = () => {
+  const handlers = new Map<string, Function>();
+  return {
+    isLeader: vi.fn().mockReturnValue(false),
+    appendEntry: vi.fn().mockResolvedValue({ success: true, index: 1 }),
+    addPeer: vi.fn(),
+    removePeer: vi.fn(),
+    on: vi.fn((event: string, handler: Function) => {
+      handlers.set(event, handler);
+    }),
+    _emit: (event: string, ...args: unknown[]) => {
+      const handler = handlers.get(event);
+      if (handler) handler(...args);
+    },
+    _handlers: handlers,
+  } as unknown as RaftNode & { _emit: Function; _handlers: Map<string, Function> };
+};
+
+// Mock client pool
+const createMockClientPool = (): GrpcClientPool => ({
+  getConnection: vi.fn(),
+} as unknown as GrpcClientPool);
+
+// Helper to create test manager
+function createTestManager(overrides?: Partial<MembershipConfig>) {
+  const mockRaft = createMockRaft();
+  const config: MembershipConfig = {
+    nodeId: 'node-1',
+    hostname: 'test-host',
+    tailscaleIp: '100.0.0.1',
+    grpcPort: 50051,
+    logger: createMockLogger(),
+    raft: mockRaft,
+    clientPool: createMockClientPool(),
+    heartbeatIntervalMs: 5000,
+    heartbeatTimeoutMs: 15000,
+    ...overrides,
+  };
+  return { manager: new MembershipManager(config), mockRaft, config };
+}
+
+describe('MembershipManager', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe('Initialization', () => {
+    it('should register self node on creation', () => {
+      const { manager } = createTestManager();
+
+      const selfNode = manager.getSelfNode();
+
+      expect(selfNode.nodeId).toBe('node-1');
+      expect(selfNode.hostname).toBe('test-host');
+      expect(selfNode.tailscaleIp).toBe('100.0.0.1');
+      expect(selfNode.status).toBe('active');
+    });
+
+    it('should set up Raft event listeners', () => {
+      const { mockRaft } = createTestManager();
+
+      expect(mockRaft.on).toHaveBeenCalledWith('stateChange', expect.any(Function));
+      expect(mockRaft.on).toHaveBeenCalledWith('entryCommitted', expect.any(Function));
+    });
+
+    it('should default to follower role', () => {
+      const { manager } = createTestManager();
+
+      expect(manager.getSelfNode().role).toBe('follower');
+    });
+  });
+});
