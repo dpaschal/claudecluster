@@ -194,4 +194,147 @@ describe('RaftNode', () => {
       node.stop();
     });
   });
+
+  describe('RequestVote RPC', () => {
+    it('should grant vote to candidate with current term and up-to-date log', () => {
+      const node = createTestNode();
+      node.start();
+
+      const response = node.handleRequestVote({
+        term: 1,
+        candidateId: 'node-2',
+        lastLogIndex: 0,
+        lastLogTerm: 0,
+      });
+
+      expect(response.voteGranted).toBe(true);
+      expect(response.term).toBe(1);
+
+      node.stop();
+    });
+
+    it('should reject vote if already voted for another candidate', () => {
+      const node = createTestNode();
+      node.start();
+
+      // First vote
+      node.handleRequestVote({
+        term: 1,
+        candidateId: 'node-2',
+        lastLogIndex: 0,
+        lastLogTerm: 0,
+      });
+
+      // Second vote request in same term
+      const response = node.handleRequestVote({
+        term: 1,
+        candidateId: 'node-3',
+        lastLogIndex: 0,
+        lastLogTerm: 0,
+      });
+
+      expect(response.voteGranted).toBe(false);
+
+      node.stop();
+    });
+
+    it('should grant vote to same candidate again', () => {
+      const node = createTestNode();
+      node.start();
+
+      // First vote
+      node.handleRequestVote({
+        term: 1,
+        candidateId: 'node-2',
+        lastLogIndex: 0,
+        lastLogTerm: 0,
+      });
+
+      // Same candidate asks again
+      const response = node.handleRequestVote({
+        term: 1,
+        candidateId: 'node-2',
+        lastLogIndex: 0,
+        lastLogTerm: 0,
+      });
+
+      expect(response.voteGranted).toBe(true);
+
+      node.stop();
+    });
+
+    it('should reject vote for older term', () => {
+      const node = createTestNode();
+      node.start();
+
+      // Advance to term 2 by receiving higher term
+      node.handleAppendEntries({
+        term: 2,
+        leaderId: 'node-leader',
+        prevLogIndex: 0,
+        prevLogTerm: 0,
+        entries: [],
+        leaderCommit: 0,
+      });
+
+      // Request vote with older term
+      const response = node.handleRequestVote({
+        term: 1,
+        candidateId: 'node-2',
+        lastLogIndex: 0,
+        lastLogTerm: 0,
+      });
+
+      expect(response.voteGranted).toBe(false);
+      expect(response.term).toBe(2);
+
+      node.stop();
+    });
+
+    it('should update term when receiving higher term vote request', () => {
+      const node = createTestNode();
+      node.start();
+
+      expect(node.getCurrentTerm()).toBe(0);
+
+      node.handleRequestVote({
+        term: 5,
+        candidateId: 'node-2',
+        lastLogIndex: 0,
+        lastLogTerm: 0,
+      });
+
+      expect(node.getCurrentTerm()).toBe(5);
+      expect(node.getState()).toBe('follower');
+
+      node.stop();
+    });
+
+    it('should reject vote for candidate with outdated log', () => {
+      const node = createTestNode();
+      node.start();
+
+      // Simulate having a log entry by receiving AppendEntries
+      node.handleAppendEntries({
+        term: 1,
+        leaderId: 'node-leader',
+        prevLogIndex: 0,
+        prevLogTerm: 0,
+        entries: [{ term: 1, index: 1, type: 'noop', data: Buffer.alloc(0) }],
+        leaderCommit: 0,
+      });
+
+      // Candidate with older log
+      const response = node.handleRequestVote({
+        term: 2,
+        candidateId: 'node-2',
+        lastLogIndex: 0,
+        lastLogTerm: 0,
+      });
+
+      expect(response.voteGranted).toBe(false);
+
+      node.stop();
+    });
+  });
 });
