@@ -124,36 +124,62 @@ export class ClaudeCluster extends EventEmitter {
   private announcer: ClusterAnnouncer | null = null;
 
   private running = false;
+  private mcpMode = false;
 
-  constructor(config: ClusterConfig) {
+  constructor(config: ClusterConfig, options?: { mcpMode?: boolean }) {
     super();
     this.config = config;
+    this.mcpMode = options?.mcpMode ?? false;
     this.nodeId = `node-${randomUUID().slice(0, 8)}`;
     this.sessionId = randomUUID();
     this.logger = this.createLogger();
   }
 
   private createLogger(): winston.Logger {
-    const transports: winston.transport[] = [
-      new winston.transports.Console({
-        format: this.config.logging.format === 'json'
-          ? winston.format.json()
-          : winston.format.combine(
-              winston.format.colorize(),
-              winston.format.timestamp(),
-              winston.format.printf(({ timestamp, level, message, ...meta }) => {
-                const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
-                return `${timestamp} [${level}] ${message}${metaStr}`;
-              })
-            ),
-      }),
-    ];
+    const transports: winston.transport[] = [];
 
+    // In MCP mode, only log to file to keep stdio clean
+    if (!this.mcpMode) {
+      transports.push(
+        new winston.transports.Console({
+          format: this.config.logging.format === 'json'
+            ? winston.format.json()
+            : winston.format.combine(
+                winston.format.colorize(),
+                winston.format.timestamp(),
+                winston.format.printf(({ timestamp, level, message, ...meta }) => {
+                  const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
+                  return `${timestamp} [${level}] ${message}${metaStr}`;
+                })
+              ),
+        })
+      );
+    }
+
+    // Always add file transport if configured
     if (this.config.logging.file) {
-      transports.push(new winston.transports.File({
-        filename: this.config.logging.file,
-        format: winston.format.json(),
-      }));
+      transports.push(
+        new winston.transports.File({
+          filename: this.config.logging.file,
+          format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.json()
+          ),
+        })
+      );
+    }
+
+    // Ensure at least one transport
+    if (transports.length === 0) {
+      transports.push(
+        new winston.transports.File({
+          filename: '/tmp/claudecluster.log',
+          format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.json()
+          ),
+        })
+      );
     }
 
     return winston.createLogger({
@@ -171,12 +197,14 @@ export class ClaudeCluster extends EventEmitter {
     // Check for isolated mode - no cluster connection
     if (this.config.mode?.isolated) {
       this.logger.info('Starting in isolated mode (no cluster connection)');
-      console.log('\n' + '='.repeat(60));
-      console.log('  Claude Cluster - ISOLATED MODE');
-      console.log('='.repeat(60));
-      console.log('  Not connected to any cluster.');
-      console.log('  Use --invisible or no flags to join the cluster.');
-      console.log('='.repeat(60) + '\n');
+      if (!this.mcpMode) {
+        console.log('\n' + '='.repeat(60));
+        console.log('  Claude Cluster - ISOLATED MODE');
+        console.log('='.repeat(60));
+        console.log('  Not connected to any cluster.');
+        console.log('  Use --invisible or no flags to join the cluster.');
+        console.log('='.repeat(60) + '\n');
+      }
       this.running = true;
       return;
     }
@@ -413,6 +441,7 @@ export class ClaudeCluster extends EventEmitter {
       membership: this.membership!,
       clientPool: this.clientPool!,
       invisible: this.config.mode?.invisible,
+      silent: this.mcpMode,
     });
 
     // Forward announcements to event emitter
@@ -575,8 +604,13 @@ export class ClaudeCluster extends EventEmitter {
       nodeId: this.nodeId,
     });
 
-    // Note: MCP server uses stdio, so it starts when needed
     this.logger.info('MCP server initialized');
+
+    // In MCP mode, start the server (uses stdio for communication)
+    if (this.mcpMode) {
+      this.logger.info('Starting MCP server in stdio mode');
+      await this.mcpServer.start();
+    }
   }
 
   private resolvePath(p: string): string {
@@ -608,6 +642,48 @@ export class ClaudeCluster extends EventEmitter {
   }
 }
 
+// MCP-only mode for Claude Code integration
+// Starts a full cluster node but with logging redirected to file
+// so stdio is clean for MCP communication
+async function runMcpServer(config: ClusterConfig, options: { seed?: string; verbose?: boolean; port?: string }): Promise<void> {
+  // Force logging to file only (MCP uses stdio)
+  config.logging.file = '/tmp/claudecluster-mcp.log';
+
+  // Apply CLI overrides
+  if (options.port) {
+    config.node.grpcPort = parseInt(options.port);
+  }
+  if (options.seed) {
+    config.seeds = [{ address: options.seed }];
+  }
+  if (options.verbose) {
+    config.logging.level = 'debug';
+  }
+
+  // Mark as invisible so we don't spam announcements
+  config.mode = {
+    invisible: true,
+    isolated: false,
+  };
+
+  // Create cluster with file-only logging
+  const cluster = new ClaudeCluster(config, { mcpMode: true });
+
+  // Handle shutdown
+  process.on('SIGINT', async () => {
+    await cluster.stop();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', async () => {
+    await cluster.stop();
+    process.exit(0);
+  });
+
+  // Start cluster (will start MCP server with stdio)
+  await cluster.start();
+}
+
 // CLI entry point
 async function main(): Promise<void> {
   const program = new Command();
@@ -617,6 +693,7 @@ async function main(): Promise<void> {
     .description('Peer-to-peer compute mesh for Claude sessions')
     .version('0.1.0')
     .option('-c, --config <path>', 'Path to configuration file', 'config/default.yaml')
+    .option('--mcp', 'Run as MCP server only (for Claude Code integration)')
     .option('--invisible', 'Connect to cluster without announcing presence (can see others, they cannot see you)')
     .option('--isolated', 'Run without any cluster connection')
     .option('-p, --port <number>', 'gRPC port to listen on')
@@ -655,6 +732,12 @@ async function main(): Promise<void> {
 
   if (options.verbose) {
     config.logging.level = 'debug';
+  }
+
+  // MCP-only mode for Claude Code integration
+  if (options.mcp) {
+    await runMcpServer(config, options);
+    return;
   }
 
   const cluster = new ClaudeCluster(config);

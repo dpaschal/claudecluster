@@ -10,6 +10,7 @@ export interface AnnouncementConfig {
   membership: MembershipManager;
   clientPool: GrpcClientPool;
   invisible?: boolean; // Node can see cluster but isn't announced
+  silent?: boolean;    // Suppress all console output (for MCP mode)
 }
 
 export interface ClusterAnnouncement {
@@ -60,6 +61,11 @@ export class ClusterAnnouncer extends EventEmitter {
 
   // Show cluster status on connection
   private showClusterStatus(nodes: NodeInfo[], selfNode: NodeInfo): void {
+    // Skip console output in silent mode (MCP mode)
+    if (this.config.silent) {
+      return;
+    }
+
     const otherNodes = nodes.filter(n => n.nodeId !== selfNode.nodeId);
     const activeNodes = otherNodes.filter(n => n.status === 'active');
 
@@ -258,6 +264,11 @@ export class ClusterAnnouncer extends EventEmitter {
 
   // Display announcement to console
   private displayAnnouncement(announcement: ClusterAnnouncement): void {
+    // Skip console output in silent mode (MCP mode)
+    if (this.config.silent) {
+      return;
+    }
+
     const icon = announcement.type === 'join' ? '++' : '--';
     const color = announcement.type === 'join' ? '\x1b[32m' : '\x1b[33m'; // Green or yellow
     const reset = '\x1b[0m';

@@ -81,8 +81,12 @@ npm start -- --seeds 100.104.78.123:50051
 
 ### Claude Code Integration
 
-Add to your Claude Code MCP configuration:
+1. **Start a cluster node** on at least one machine:
+```bash
+npm start
+```
 
+2. **Add to your Claude Code MCP configuration** (`~/.claude.json` or settings):
 ```json
 {
   "mcpServers": {
@@ -93,6 +97,13 @@ Add to your Claude Code MCP configuration:
   }
 }
 ```
+
+The `--mcp` flag runs claudecluster as an MCP server that connects to the cluster. Logs go to `/tmp/claudecluster-mcp.log` to keep stdio clean for MCP communication.
+
+**Optional flags for MCP mode:**
+- `--seed <address>` - Connect to specific cluster node (e.g., `--seed 100.104.78.123:50051`)
+- `--port <port>` - Use different gRPC port (default: 50051)
+- `-v` - Enable verbose logging
 
 ## Documentation
 

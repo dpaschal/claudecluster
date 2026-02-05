@@ -2,6 +2,8 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { EventEmitter } from 'events';
 import path from 'path';
+import net from 'net';
+import { execSync } from 'child_process';
 import { Logger } from 'winston';
 
 const PROTO_PATH = path.join(__dirname, '../../proto/cluster.proto');
@@ -83,6 +85,18 @@ export class GrpcServer extends EventEmitter {
   }
 
   async start(): Promise<void> {
+    // Check if port is already in use before attempting to bind
+    const portCheck = await this.checkPortInUse(this.config.port);
+    if (portCheck.inUse) {
+      const errorMessage = this.formatPortInUseError(this.config.port, portCheck);
+      this.config.logger.error('Port already in use', {
+        port: this.config.port,
+        pid: portCheck.pid,
+        process: portCheck.processName
+      });
+      throw new Error(errorMessage);
+    }
+
     return new Promise((resolve, reject) => {
       const address = `${this.config.host}:${this.config.port}`;
       const credentials = this.config.tlsCredentials || grpc.ServerCredentials.createInsecure();
@@ -100,6 +114,86 @@ export class GrpcServer extends EventEmitter {
         resolve();
       });
     });
+  }
+
+  private async checkPortInUse(port: number): Promise<{ inUse: boolean; pid?: number; processName?: string }> {
+    return new Promise((resolve) => {
+      const server = net.createServer();
+
+      server.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          // Port is in use, try to find what's using it
+          const processInfo = this.getProcessUsingPort(port);
+          resolve({ inUse: true, ...processInfo });
+        } else {
+          resolve({ inUse: false });
+        }
+      });
+
+      server.once('listening', () => {
+        server.close();
+        resolve({ inUse: false });
+      });
+
+      server.listen(port, '0.0.0.0');
+    });
+  }
+
+  private getProcessUsingPort(port: number): { pid?: number; processName?: string } {
+    try {
+      // Try ss first (Linux)
+      const ssOutput = execSync(`ss -tlnp 2>/dev/null | grep ':${port} '`, { encoding: 'utf-8' });
+      const pidMatch = ssOutput.match(/pid=(\d+)/);
+      if (pidMatch) {
+        const pid = parseInt(pidMatch[1], 10);
+        try {
+          const psOutput = execSync(`ps -p ${pid} -o comm= 2>/dev/null`, { encoding: 'utf-8' }).trim();
+          return { pid, processName: psOutput };
+        } catch {
+          return { pid };
+        }
+      }
+    } catch {
+      // ss failed, try lsof (macOS/Linux)
+      try {
+        const lsofOutput = execSync(`lsof -i :${port} -t 2>/dev/null`, { encoding: 'utf-8' });
+        const pid = parseInt(lsofOutput.trim().split('\n')[0], 10);
+        if (!isNaN(pid)) {
+          try {
+            const psOutput = execSync(`ps -p ${pid} -o comm= 2>/dev/null`, { encoding: 'utf-8' }).trim();
+            return { pid, processName: psOutput };
+          } catch {
+            return { pid };
+          }
+        }
+      } catch {
+        // Could not determine what's using the port
+      }
+    }
+    return {};
+  }
+
+  private formatPortInUseError(port: number, info: { pid?: number; processName?: string }): string {
+    let message = `Port ${port} is already in use`;
+
+    if (info.pid) {
+      message += ` by PID ${info.pid}`;
+      if (info.processName) {
+        message += ` (${info.processName})`;
+      }
+      message += `.\n\nTo fix this:\n`;
+      message += `  1. Stop the existing process: kill ${info.pid}\n`;
+      message += `  2. Or use a different port: --port ${port + 1}\n`;
+
+      if (info.processName?.includes('node') || info.processName?.includes('claudecluster')) {
+        message += `\nThis appears to be another claudecluster instance. `;
+        message += `Stop it first or connect to the existing cluster.`;
+      }
+    } else {
+      message += `.\n\nUse a different port with: --port ${port + 1}`;
+    }
+
+    return message;
   }
 
   async stop(): Promise<void> {
