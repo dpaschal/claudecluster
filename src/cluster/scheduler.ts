@@ -330,8 +330,15 @@ export class TaskScheduler extends EventEmitter {
 
   // Check if a node meets resource requirements
   private meetsRequirements(node: NodeInfo, requirements: ResourceRequirements): boolean {
+    // If no specific requirements, allow scheduling even without resource info
+    const hasRequirements = requirements.cpuCores || requirements.memoryBytes ||
+                           requirements.requiresGpu || requirements.gpuMemoryBytes;
+    if (!hasRequirements) {
+      return true; // No requirements specified, any node works
+    }
+
     if (!node.resources) {
-      return false; // No resource info, can't schedule
+      return false; // Has requirements but no resource info, can't verify
     }
 
     const resources = node.resources;
