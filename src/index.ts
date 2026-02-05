@@ -131,9 +131,50 @@ export class ClaudeCluster extends EventEmitter {
     super();
     this.config = config;
     this.mcpMode = options?.mcpMode ?? false;
-    this.nodeId = `node-${randomUUID().slice(0, 8)}`;
+    this.nodeId = this.getOrCreateNodeId();
     this.sessionId = randomUUID();
     this.logger = this.createLogger();
+  }
+
+  /**
+   * Get persistent node ID from file, or create a new one.
+   * Node IDs are stored in ~/.claudecluster/node-id to survive restarts.
+   * Format: hostname-shortid (e.g., "rog2-8e800054")
+   */
+  private getOrCreateNodeId(): string {
+    const os = require('os');
+    const fs = require('fs');
+    const nodePath = require('path');
+
+    const homeDir = process.env.HOME || os.homedir();
+    const configDir = nodePath.join(homeDir, '.claudecluster');
+    const nodeIdFile = nodePath.join(configDir, 'node-id');
+
+    // Try to read existing node ID
+    try {
+      const existingId = fs.readFileSync(nodeIdFile, 'utf-8').trim();
+      if (existingId) {
+        const hostname = os.hostname().split('.')[0]; // Get short hostname
+        return `${hostname}-${existingId}`;
+      }
+    } catch {
+      // File doesn't exist or can't be read, create new ID
+    }
+
+    // Generate new short ID
+    const shortId = randomUUID().slice(0, 8);
+
+    // Ensure config directory exists
+    try {
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(nodeIdFile, shortId);
+    } catch (error) {
+      // If we can't write, just use the generated ID (won't persist)
+      console.warn('Could not persist node ID:', error);
+    }
+
+    const hostname = os.hostname().split('.')[0];
+    return `${hostname}-${shortId}`;
   }
 
   private createLogger(): winston.Logger {
