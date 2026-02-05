@@ -212,12 +212,6 @@ export class MembershipManager extends EventEmitter {
     leaderAddress: string;
     peers: NodeInfo[];
   }> {
-    this.config.logger.info('handleJoinRequest', {
-      requestingNode: node.nodeId,
-      isLeader: this.config.raft.isLeader(),
-      autoApprove: this.config.autoApprove,
-    });
-
     if (!this.config.raft.isLeader()) {
       // Redirect to leader - try to get fresh leader address
       let leaderAddr = '';
