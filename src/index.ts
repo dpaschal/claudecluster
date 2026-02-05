@@ -25,6 +25,7 @@ import { ClusterAnnouncer } from './cluster/announcements.js';
 import { createClusterServiceHandlers, createRaftServiceHandlers, createAgentServiceHandlers } from './grpc/handlers.js';
 import { Command } from 'commander';
 import { randomUUID } from 'crypto';
+import chalk from 'chalk';
 
 export interface ClusterModeOptions {
   invisible?: boolean;  // Can see cluster but isn't announced
@@ -685,6 +686,22 @@ async function runMcpServer(config: ClusterConfig, options: { seed?: string; ver
 }
 
 // CLI entry point
+function showBanner(): void {
+  const banner = `
+${chalk.cyan(`   _____ _                 _        _____ _           _
+  / ____| |               | |      / ____| |         | |
+ | |    | | __ _ _   _  __| | ___ | |    | |_   _ ___| |_ ___ _ __
+ | |    | |/ _\` | | | |/ _\` |/ _ \\| |    | | | | / __| __/ _ \\ '__|
+ | |____| | (_| | |_| | (_| |  __/| |____| | |_| \\__ \\ ||  __/ |
+  \\_____|_|\\__,_|\\__,_|\\__,_|\\___| \\_____|_|\\__,_|___/\\__\\___|_|   `)}
+
+        ${chalk.magenta('╔═══════════════════════════════════════╗')}
+        ${chalk.magenta('║')}   ${chalk.white.bold('P2P Compute Mesh')} ${chalk.cyan('◈')} ${chalk.yellow('Distributed AI')}   ${chalk.magenta('║')}
+        ${chalk.magenta('╚═══════════════════════════════════════╝')}
+`;
+  console.log(banner);
+}
+
 async function main(): Promise<void> {
   const program = new Command();
 
@@ -702,6 +719,11 @@ async function main(): Promise<void> {
     .parse(process.argv);
 
   const options = program.opts();
+
+  // Show banner unless in MCP mode (MCP uses stdio for JSON)
+  if (!options.mcp) {
+    showBanner();
+  }
 
   // Load configuration
   let config: ClusterConfig;

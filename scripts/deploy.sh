@@ -22,11 +22,33 @@ NODES=(
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+ORANGE='\033[0;33m'
 NC='\033[0m' # No Color
 
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+show_banner() {
+    echo -e "${CYAN}"
+    cat << 'EOF'
+   _____ _                 _        _____ _           _
+  / ____| |               | |      / ____| |         | |
+ | |    | | __ _ _   _  __| | ___ | |    | |_   _ ___| |_ ___ _ __
+ | |    | |/ _` | | | |/ _` |/ _ \| |    | | | | / __| __/ _ \ '__|
+ | |____| | (_| | |_| | (_| |  __/| |____| | |_| \__ \ ||  __/ |
+  \_____|_|\__,_|\__,_|\__,_|\___| \_____|_|\__,_|___/\__\___|_|
+EOF
+    echo -e "${NC}"
+    echo -e "        ${MAGENTA}╔═══════════════════════════════════════╗${NC}"
+    echo -e "        ${MAGENTA}║${NC}   ${WHITE}P2P Compute Mesh${NC} ${CYAN}◈${NC} ${ORANGE}Rolling Deploy${NC}   ${MAGENTA}║${NC}"
+    echo -e "        ${MAGENTA}╚═══════════════════════════════════════╝${NC}"
+    echo
+}
 
 # Get current node hostname
 CURRENT_NODE=$(hostname)
@@ -132,8 +154,8 @@ main() {
     local target_node=${1:-""}
     local skip_confirm=${2:-""}
 
-    log_info "Claude Cluster Rolling Deployment"
-    log_info "Current node: $CURRENT_NODE"
+    show_banner
+    log_info "Current node: ${CYAN}$CURRENT_NODE${NC}"
     echo
 
     if [ -n "$target_node" ]; then
@@ -180,10 +202,12 @@ main() {
         sleep 5
     done
 
-    log_info "=========================================="
-    log_info "Rolling deployment COMPLETE"
-    log_info "All nodes updated successfully"
-    log_info "=========================================="
+    echo
+    echo -e "${GREEN}    ╔═══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}    ║${NC}  ${WHITE}✓${NC} ${CYAN}Rolling deployment${NC} ${GREEN}COMPLETE${NC}            ${GREEN}║${NC}"
+    echo -e "${GREEN}    ║${NC}    All nodes updated successfully        ${GREEN}║${NC}"
+    echo -e "${GREEN}    ╚═══════════════════════════════════════════╝${NC}"
+    echo
 }
 
 # Show usage
