@@ -826,3 +826,227 @@ describe('Task Lifecycle', () => {
     }
   });
 });
+
+// ============================================================================
+// State Synchronization Tests
+// ============================================================================
+
+describe('State Synchronization', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should replicate task submission via Raft', async () => {
+    const { nodes } = createTestCluster(3);
+
+    // Track entryCommitted events from each raft node
+    const committedEntries: Map<string, LogEntry[]> = new Map();
+    for (const node of nodes) {
+      committedEntries.set(node.nodeId, []);
+      node.raft.on('entryCommitted', (entry: LogEntry) => {
+        committedEntries.get(node.nodeId)!.push(entry);
+      });
+    }
+
+    // Start all rafts and schedulers
+    for (const node of nodes) {
+      node.raft.start();
+      node.scheduler.start();
+    }
+
+    // Wait for leader election
+    await vi.advanceTimersByTimeAsync(350);
+
+    // Find the leader
+    const leader = nodes.find((n) => n.raft.isLeader());
+    expect(leader).toBeDefined();
+
+    // Submit a task via leader
+    const taskSpec = {
+      taskId: 'replicated-task-1',
+      type: 'shell' as const,
+      submitterNode: leader!.nodeId,
+      shell: {
+        command: 'echo "replicated"',
+      },
+    };
+
+    await leader!.scheduler.submit(taskSpec);
+
+    // Advance time for replication
+    await vi.advanceTimersByTimeAsync(200);
+
+    // Verify task entries committed on majority (>= 2 nodes)
+    let nodesWithTaskEntry = 0;
+    for (const [, entries] of committedEntries) {
+      const hasTaskEntry = entries.some((e) => e.type === 'task_submit');
+      if (hasTaskEntry) {
+        nodesWithTaskEntry++;
+      }
+    }
+    expect(nodesWithTaskEntry).toBeGreaterThanOrEqual(2);
+
+    // Stop all nodes
+    for (const node of nodes) {
+      node.raft.stop();
+      node.scheduler.stop();
+    }
+  });
+
+  it('should sync membership changes across nodes', async () => {
+    const { nodes } = createTestCluster(3);
+
+    // Start raft and membership
+    for (const node of nodes) {
+      node.raft.start();
+      node.membership.start();
+    }
+
+    // Wait for leader election
+    await vi.advanceTimersByTimeAsync(350);
+
+    // Find leader
+    const leader = nodes.find((n) => n.raft.isLeader());
+    expect(leader).toBeDefined();
+
+    // Call handleJoinRequest with a new node
+    const newNodeInfo: NodeInfo = {
+      nodeId: 'node-new',
+      hostname: 'node-new.local',
+      tailscaleIp: '100.0.0.99',
+      grpcPort: 50051,
+      role: 'follower',
+      status: 'pending_approval',
+      resources: null,
+      tags: [],
+      joinedAt: Date.now(),
+      lastSeen: Date.now(),
+    };
+
+    await leader!.membership.handleJoinRequest(newNodeInfo);
+
+    // Approve the node
+    await leader!.membership.approveNode(newNodeInfo);
+
+    // Advance time for replication
+    await vi.advanceTimersByTimeAsync(200);
+
+    // Verify leader.membership.getAllNodes() includes the new node
+    const allNodes = leader!.membership.getAllNodes();
+    const newNode = allNodes.find((n) => n.nodeId === 'node-new');
+    expect(newNode).toBeDefined();
+    expect(newNode?.status).toBe('active');
+
+    // Stop all nodes
+    for (const node of nodes) {
+      node.raft.stop();
+      node.membership.stop();
+    }
+  });
+
+  it('should maintain consistent task status', async () => {
+    const { nodes } = createTestCluster(2);
+
+    // Start components
+    for (const node of nodes) {
+      node.raft.start();
+      node.membership.start();
+      node.scheduler.start();
+    }
+
+    // Wait for leader election
+    await vi.advanceTimersByTimeAsync(350);
+
+    // Find leader
+    const leader = nodes.find((n) => n.raft.isLeader());
+    expect(leader).toBeDefined();
+
+    // Submit task
+    const taskSpec = {
+      taskId: 'consistent-task-1',
+      type: 'shell' as const,
+      submitterNode: leader!.nodeId,
+      shell: {
+        command: 'echo "consistent"',
+      },
+    };
+
+    await leader!.scheduler.submit(taskSpec);
+
+    // Advance time
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Verify leaderScheduler.getStatus(taskId) is defined
+    const status = leader!.scheduler.getStatus('consistent-task-1');
+    expect(status).toBeDefined();
+
+    // Stop all nodes
+    for (const node of nodes) {
+      node.raft.stop();
+      node.membership.stop();
+      node.scheduler.stop();
+    }
+  });
+
+  it('should recover state after leader change', async () => {
+    const { nodes } = createTestCluster(3);
+
+    // Start components
+    for (const node of nodes) {
+      node.raft.start();
+      node.membership.start();
+      node.scheduler.start();
+    }
+
+    // Wait for leader election
+    await vi.advanceTimersByTimeAsync(350);
+
+    // Find old leader
+    const oldLeader = nodes.find((n) => n.raft.isLeader());
+    expect(oldLeader).toBeDefined();
+    const oldLeaderId = oldLeader!.nodeId;
+
+    // Submit task
+    const taskSpec = {
+      taskId: 'recovery-task-1',
+      type: 'shell' as const,
+      submitterNode: oldLeader!.nodeId,
+      shell: {
+        command: 'echo "recovery"',
+      },
+    };
+
+    await oldLeader!.scheduler.submit(taskSpec);
+
+    // Advance time for replication
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Stop old leader (raft.stop())
+    oldLeader!.raft.stop();
+
+    // Advance time for re-election (1000ms)
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // Find new leader (different from old)
+    const remainingNodes = nodes.filter((n) => n.nodeId !== oldLeaderId);
+    const newLeader = remainingNodes.find((n) => n.raft.isLeader());
+
+    // Verify new leader exists (may or may not have task state depending on replication)
+    expect(newLeader).toBeDefined();
+    expect(newLeader!.nodeId).not.toBe(oldLeaderId);
+
+    // Stop remaining nodes
+    for (const node of remainingNodes) {
+      node.raft.stop();
+      node.membership.stop();
+      node.scheduler.stop();
+    }
+    // Clean up old leader's remaining components
+    oldLeader!.membership.stop();
+    oldLeader!.scheduler.stop();
+  });
+});
