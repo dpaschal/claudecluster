@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { Logger } from 'winston';
 import { MembershipManager, NodeInfo, NodeResources } from './membership.js';
 import { RaftNode } from './raft.js';
-import { AgentClient, GrpcClientPool } from '../grpc/client.js';
+import { AgentClient, ClusterClient, GrpcClientPool } from '../grpc/client.js';
 
 export interface TaskSpec {
   taskId: string;
@@ -165,18 +165,21 @@ export class TaskScheduler extends EventEmitter {
       return { accepted: false, taskId: spec.taskId, reason: validation.reason };
     }
 
+    // If not leader, forward to leader
+    if (!this.config.raft.isLeader()) {
+      return this.forwardToLeader(spec);
+    }
+
     // Check queue size
     if (this.taskQueue.size >= this.maxQueueSize) {
       return { accepted: false, taskId: spec.taskId, reason: 'Queue full' };
     }
 
-    // If leader, replicate to Raft log
-    if (this.config.raft.isLeader()) {
-      const data = Buffer.from(JSON.stringify(spec));
-      const { success } = await this.config.raft.appendEntry('task_submit', data);
-      if (!success) {
-        return { accepted: false, taskId: spec.taskId, reason: 'Failed to replicate task' };
-      }
+    // Leader: replicate to Raft log
+    const data = Buffer.from(JSON.stringify(spec));
+    const { success } = await this.config.raft.appendEntry('task_submit', data);
+    if (!success) {
+      return { accepted: false, taskId: spec.taskId, reason: 'Failed to replicate task' };
     }
 
     // Add to queue
@@ -203,6 +206,63 @@ export class TaskScheduler extends EventEmitter {
     }
 
     return { accepted: true, taskId: spec.taskId };
+  }
+
+  // Forward task submission to the leader
+  private async forwardToLeader(spec: TaskSpec): Promise<{ accepted: boolean; taskId: string; assignedNode?: string; reason?: string }> {
+    const leaderAddress = this.config.membership.getLeaderAddress();
+    if (!leaderAddress) {
+      return { accepted: false, taskId: spec.taskId, reason: 'No leader available' };
+    }
+
+    this.config.logger.info('Forwarding task to leader', {
+      taskId: spec.taskId,
+      leader: leaderAddress,
+    });
+
+    try {
+      const client = new ClusterClient(this.config.clientPool, leaderAddress);
+      const response = await client.submitTask({
+        spec: {
+          task_id: spec.taskId,
+          type: `TASK_TYPE_${spec.type.toUpperCase()}`,
+          submitter_node: spec.submitterNode,
+          submitter_session: spec.submitterSession,
+          shell: spec.shell ? {
+            command: spec.shell.command,
+            working_directory: spec.shell.workingDirectory,
+            sandboxed: spec.shell.sandboxed,
+          } : undefined,
+          container: spec.container ? {
+            image: spec.container.image,
+            command: spec.container.command,
+            args: spec.container.args,
+          } : undefined,
+          constraints: spec.constraints ? {
+            allowed_nodes: spec.constraints.allowedNodes,
+            excluded_nodes: spec.constraints.excludedNodes,
+            prefer_local: spec.constraints.preferLocal,
+            avoid_gaming_nodes: spec.constraints.avoidGamingNodes,
+          } : undefined,
+          priority: spec.priority,
+          timeout_ms: spec.timeoutMs?.toString(),
+        },
+      });
+
+      return {
+        accepted: response.accepted,
+        taskId: response.task_id,
+        assignedNode: response.assigned_node || undefined,
+        reason: response.rejection_reason || undefined,
+      };
+    } catch (error) {
+      this.config.logger.error('Failed to forward task to leader', {
+        taskId: spec.taskId,
+        leader: leaderAddress,
+        error,
+      });
+      return { accepted: false, taskId: spec.taskId, reason: 'Failed to forward to leader' };
+    }
   }
 
   // Get task status
