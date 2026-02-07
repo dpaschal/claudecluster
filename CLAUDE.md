@@ -37,16 +37,41 @@ Claude Cluster is a peer-to-peer compute mesh for distributed Claude sessions:
 - `src/security/` - mTLS, auth, secrets management
 - `proto/` - Protocol Buffer definitions
 
-### Initial Cluster Nodes
+### Cluster Nodes
 
-| Node | Tailscale IP | Role | Node ID |
-|------|--------------|------|---------|
-| rog2 | 100.104.78.123 | Leader eligible | `rog2-8e800054` |
-| terminus-1 | 100.120.202.76 | Leader eligible | needs fix (see below) |
-| forge | 100.94.211.117 | Leader eligible | - |
+| Node | Tailscale IP | Role | Status |
+|------|--------------|------|--------|
+| forge | 100.94.211.117 | Leader (seed) | systemd service, auto-start |
+| cluster-7c54 | 100.71.127.124 | Follower | systemd service, auto-start (Mac Mini) |
+| terminus-1 | 100.120.202.76 | Leader eligible | manual start |
+| rog2 | 100.104.78.123 | Leader eligible | offline (gaming PC) |
 | htnas02 | 100.103.240.34 | Worker | - |
 
 ## Pending Tasks
+
+### Build multi-architecture auto-install USB
+
+**Priority:** Medium
+
+Create a USB installer that works on both x86_64 and aarch64 hardware (Intel/AMD PCs and ARM devices like Raspberry Pi, M1+ Macs).
+
+**Current state:**
+- x86_64 NixOS auto-installer USB exists at `/tmp/nixos-cluster/`
+- meshbridge (Pi 4B+ at 192.168.4.38) available for aarch64 builds
+- Nix needs to be installed on meshbridge first
+
+**Steps:**
+1. Install Nix on meshbridge: `curl -L https://nixos.org/nix/install | sh -s -- --daemon`
+2. Update flake.nix to output both `packages.x86_64-linux.installer-iso` and `packages.aarch64-linux.installer-iso`
+3. Build aarch64 ISO on meshbridge
+4. Combine both ISOs onto single USB with dual EFI bootloaders:
+   - `/EFI/BOOT/BOOTX64.EFI` for x86_64
+   - `/EFI/BOOT/BOOTAA64.EFI` for aarch64
+5. Install script should detect arch with `uname -m` and use appropriate squashfs
+
+**Reference:** meshbridge.local (192.168.4.38), user: paschal
+
+---
 
 ### Fix terminus persistent node ID
 

@@ -12,6 +12,8 @@ import { MembershipManager } from '../cluster/membership.js';
 import { TaskScheduler, TaskSpec, TaskStatus } from '../cluster/scheduler.js';
 import { KubernetesAdapter, K8sJobSpec } from '../kubernetes/adapter.js';
 import { createTools, ToolHandler } from './tools.js';
+import { createTimelineTools } from './timeline-tools.js';
+import { TimelineDB } from './timeline-db.js';
 
 export interface McpServerConfig {
   logger: Logger;
@@ -27,6 +29,7 @@ export class ClusterMcpServer {
   private config: McpServerConfig;
   private server: Server;
   private toolHandlers: Map<string, ToolHandler>;
+  private timelineDb: TimelineDB | null = null;
 
   constructor(config: McpServerConfig) {
     this.config = config;
@@ -48,7 +51,7 @@ export class ClusterMcpServer {
   }
 
   private createToolHandlers(): Map<string, ToolHandler> {
-    return createTools({
+    const clusterTools = createTools({
       stateManager: this.config.stateManager,
       membership: this.config.membership,
       scheduler: this.config.scheduler,
@@ -57,6 +60,18 @@ export class ClusterMcpServer {
       nodeId: this.config.nodeId,
       logger: this.config.logger,
     });
+
+    // Add timeline tools
+    const { tools: timelineTools, db } = createTimelineTools({
+      logger: this.config.logger,
+    });
+    this.timelineDb = db;
+
+    for (const [name, handler] of timelineTools) {
+      clusterTools.set(name, handler);
+    }
+
+    return clusterTools;
   }
 
   private setupHandlers(): void {
@@ -184,6 +199,9 @@ export class ClusterMcpServer {
   }
 
   async stop(): Promise<void> {
+    if (this.timelineDb) {
+      await this.timelineDb.close();
+    }
     await this.server.close();
     this.config.logger.info('MCP server stopped');
   }
