@@ -9,6 +9,9 @@
 <p align="center">
   <b>☕ Buy me Claude Code credits or support a project! ☕</b>
 </p>
+<p align="center">
+  <i>Every donation keeps the code flowing — these tools are built with your support.</i>
+</p>
 
 <p align="center">
   <a href="https://buymeacoffee.com/dpaschal">
