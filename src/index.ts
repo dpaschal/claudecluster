@@ -279,15 +279,25 @@ export class ClaudeCluster extends EventEmitter {
       // Initialize Kubernetes
       await this.initializeKubernetes();
 
-      // Join or create cluster
-      await this.joinOrCreateCluster();
+      if (this.mcpMode) {
+        // In MCP mode, start serving immediately — cluster joins in background
+        await this.initializeMcp();
+        this.running = true;
+        this.logger.info('MCP server ready, joining cluster in background');
+        this.emit('started');
 
-      // Initialize MCP server
-      await this.initializeMcp();
-
-      this.running = true;
-      this.logger.info('Claude Cluster started successfully');
-      this.emit('started');
+        // Join cluster in background — don't block MCP
+        this.joinOrCreateCluster().catch((error) => {
+          this.logger.error('Background cluster join failed', { error });
+        });
+      } else {
+        // Normal mode: join cluster first, then init MCP
+        await this.joinOrCreateCluster();
+        await this.initializeMcp();
+        this.running = true;
+        this.logger.info('Claude Cluster started successfully');
+        this.emit('started');
+      }
     } catch (error) {
       this.logger.error('Failed to start cluster', { error });
       await this.stop();
