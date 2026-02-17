@@ -42,10 +42,11 @@ Claude Cluster is a peer-to-peer compute mesh for distributed Claude sessions:
 | Node | Tailscale IP | Role | Status |
 |------|--------------|------|--------|
 | forge | 100.94.211.117 | Leader (seed) | systemd service, auto-start |
-| cluster-7c54 | 100.71.127.124 | Follower | systemd service, auto-start (Mac Mini) |
+| hammer | 100.73.18.82 | Follower | systemd service, auto-start |
+| htnas02 | 100.103.240.34 | Follower (72c/756GB/Tesla P4) | systemd service, auto-start |
+| anvil | 100.69.42.106 | Follower (NixOS, hosts cerebrus DB) | NixOS systemd service, auto-start |
 | terminus-1 | 100.120.202.76 | Leader eligible | manual start |
 | rog2 | 100.104.78.123 | Leader eligible | offline (gaming PC) |
-| htnas02 | 100.103.240.34 | Worker | - |
 
 ## Pending Tasks
 
