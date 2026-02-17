@@ -36,7 +36,7 @@ export class GrpcClientPool extends EventEmitter {
 
   async loadProto(): Promise<void> {
     this.packageDefinition = await protoLoader.load(PROTO_PATH, {
-      keepCase: false,  // Use camelCase for JS-idiomatic field names
+      keepCase: true,  // Must match server's keepCase setting
       longs: String,
       enums: String,
       defaults: true,
