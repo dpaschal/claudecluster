@@ -464,6 +464,7 @@ describe('MembershipManager', () => {
 
     it('should mark node as offline when lastSeen exceeds timeout', () => {
       const { manager, mockRaft } = createTestManager({ heartbeatTimeoutMs: 15000 });
+      mockRaft.isLeader.mockReturnValue(true);
 
       // Simulate a committed node_join to add a peer
       const entryHandler = mockRaft._handlers.get('entryCommitted');
@@ -491,6 +492,7 @@ describe('MembershipManager', () => {
 
     it('should emit nodeOffline event for timed-out nodes', () => {
       const { manager, mockRaft } = createTestManager({ heartbeatTimeoutMs: 15000 });
+      mockRaft.isLeader.mockReturnValue(true);
 
       // Add a peer via Raft commit
       const entryHandler = mockRaft._handlers.get('entryCommitted');

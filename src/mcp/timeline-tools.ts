@@ -101,7 +101,7 @@ export function createTimelineTools(config: TimelineToolsConfig): { tools: Map<s
         thought_type: {
           type: 'string',
           description: 'Type of thought',
-          enum: ['idea', 'decision', 'discovery', 'blocker', 'progress', 'tangent_start'],
+          enum: ['idea', 'decision', 'discovery', 'blocker', 'progress', 'tangent_start', 'handoff'],
         },
         metadata: {
           type: 'object',
@@ -248,6 +248,115 @@ export function createTimelineTools(config: TimelineToolsConfig): { tools: Map<s
         parentThreadId: result.parent_thread?.id,
       });
       return result;
+    },
+  });
+
+  // timeline_checkpoint
+  tools.set('timeline_checkpoint', {
+    description: 'Quick checkpoint — log what you\'re doing right now. Lower ceremony than add_thought. Defaults to "progress" type.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        thread_id: {
+          type: 'number',
+          description: 'Thread to checkpoint on',
+        },
+        message: {
+          type: 'string',
+          description: 'What you\'re doing right now (brief)',
+        },
+      },
+      required: ['thread_id', 'message'],
+    },
+    handler: async (args) => {
+      const thought = await db.addThought(
+        args.thread_id as number,
+        args.message as string,
+        'progress'
+      );
+      config.logger.info('Timeline checkpoint', { thoughtId: thought.id, threadId: thought.thread_id });
+      return { checkpointed: true, thought_id: thought.id };
+    },
+  });
+
+  // timeline_handoff
+  tools.set('timeline_handoff', {
+    description: 'Structured session-end handoff. Logs what was done, what\'s pending, blockers, and next steps. Updates thread position.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        thread_id: {
+          type: 'number',
+          description: 'Thread to write the handoff to',
+        },
+        done: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of things completed this session',
+        },
+        pending: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of things still open',
+        },
+        blockers: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of blockers (empty array if none)',
+        },
+        next_steps: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Concrete next steps for the next session',
+        },
+        update_status: {
+          type: 'string',
+          description: 'Optionally update the thread status',
+          enum: ['active', 'paused', 'completed'],
+        },
+      },
+      required: ['thread_id', 'done', 'next_steps'],
+    },
+    handler: async (args) => {
+      const done = (args.done as string[]).map((d) => `- ${d}`).join('\n');
+      const pending = (args.pending as string[] | undefined)?.map((p) => `- ${p}`).join('\n') || '- None';
+      const blockers = (args.blockers as string[] | undefined)?.map((b) => `- ${b}`).join('\n') || '- None';
+      const nextSteps = (args.next_steps as string[]).map((n) => `- ${n}`).join('\n');
+
+      const content = `## Session Handoff\n\n**Done:**\n${done}\n\n**Pending:**\n${pending}\n\n**Blockers:**\n${blockers}\n\n**Next Steps:**\n${nextSteps}`;
+
+      const thought = await db.addThought(
+        args.thread_id as number,
+        content,
+        'handoff',
+        { type: 'session_handoff' }
+      );
+
+      if (args.update_status) {
+        await db.updateThreadStatus(args.thread_id as number, args.update_status as string);
+      }
+
+      config.logger.info('Timeline handoff', { thoughtId: thought.id, threadId: args.thread_id });
+      return { handoff_thought_id: thought.id, thread_id: args.thread_id, status: args.update_status || 'unchanged' };
+    },
+  });
+
+  // timeline_list_projects
+  tools.set('timeline_list_projects', {
+    description: 'List all projects in the project registry. Shows name, employer, language, location, status, and tags.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          description: 'Filter by status (default: all)',
+          enum: ['active', 'archived', 'completed'],
+        },
+      },
+    },
+    handler: async (args) => {
+      const projects = await db.listProjects(args.status as string | undefined);
+      return projects;
     },
   });
 

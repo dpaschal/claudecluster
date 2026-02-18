@@ -222,6 +222,22 @@ export class TimelineDB {
     return result.rows[0] ?? null;
   }
 
+  // --- Projects ---
+
+  async listProjects(status?: string): Promise<Record<string, unknown>[]> {
+    let query = 'SELECT * FROM timeline.projects';
+    const params: unknown[] = [];
+
+    if (status) {
+      query += ' WHERE status = $1';
+      params.push(status);
+    }
+
+    query += ' ORDER BY name';
+    const result = await this.pool.query(query, params);
+    return result.rows;
+  }
+
   // --- Navigation ---
 
   async whereAmI(): Promise<{ active_threads: ThreadWithPosition[] }> {

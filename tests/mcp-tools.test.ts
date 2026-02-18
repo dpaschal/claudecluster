@@ -124,6 +124,8 @@ function createMockMembership() {
   return {
     getAllNodes: vi.fn().mockReturnValue(nodes),
     getActiveNodes: vi.fn().mockReturnValue(nodes),
+    getLeaderAddress: vi.fn().mockReturnValue('100.94.211.117:50051'),
+    getSelfNode: vi.fn().mockReturnValue(nodes[0]),
     removeNode: vi.fn().mockResolvedValue(true),
   } as unknown as MembershipManager;
 }
@@ -259,6 +261,8 @@ describe('MCP Tools', () => {
           createMockNode({ nodeId: 'node-2', status: 'active' }),
           offlineNode,
         ]),
+        getLeaderAddress: vi.fn().mockReturnValue(null),
+        getSelfNode: vi.fn().mockReturnValue(createMockNode()),
       } as unknown as MembershipManager;
       const config = createToolsConfig({ membership });
       const tools = createTools(config);
