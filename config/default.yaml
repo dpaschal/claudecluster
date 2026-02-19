@@ -130,6 +130,23 @@ mcp:
   serverName: cortex
   serverVersion: "0.1.0"
 
+# Shared memory database (Raft-replicated SQLite)
+sharedMemory:
+  # Enable shared memory (set false to use legacy PostgreSQL tools)
+  enabled: true
+
+  # Data directory for shared-memory.db
+  dataDir: ~/.cortex
+
+  # Integrity check interval (milliseconds, 0 to disable)
+  integrityCheckIntervalMs: 300000  # 5 minutes
+
+  # Litestream backup (leader only)
+  backup:
+    enabled: false
+    bucket: paschal-homelab-backups
+    path: cortex/shared-memory/
+
 # Messaging gateway (absorbed from OpenClaw)
 messaging:
   enabled: false
