@@ -29,7 +29,6 @@ export interface ToolsConfig {
   sessionId: string;
   nodeId: string;
   logger: Logger;
-  clientPool?: GrpcClientPool;
 }
 
 export function createTools(config: ToolsConfig): Map<string, ToolHandler> {

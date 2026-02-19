@@ -31,7 +31,6 @@ export interface McpServerConfig {
   raft: RaftNode;
   sessionId: string;
   nodeId: string;
-  clientPool?: GrpcClientPool;
 }
 
 export class ClusterMcpServer {
@@ -72,7 +71,6 @@ export class ClusterMcpServer {
       sessionId: this.config.sessionId,
       nodeId: this.config.nodeId,
       logger: this.config.logger,
-      clientPool: this.config.clientPool,
     });
 
     // Add timeline tools
