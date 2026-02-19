@@ -132,7 +132,7 @@ export interface ClusterConfig {
   seeds?: Array<{ address: string }>;
 }
 
-export class ClaudeCluster extends EventEmitter {
+export class Cortex extends EventEmitter {
   private config: ClusterConfig;
   private logger: winston.Logger;
   private nodeId: string;
@@ -175,7 +175,8 @@ export class ClaudeCluster extends EventEmitter {
 
   /**
    * Get persistent node ID from file, or create a new one.
-   * Node IDs are stored in ~/.claudecluster/node-id to survive restarts.
+   * Node IDs are stored in ~/.cortex/node-id to survive restarts.
+   * Falls back to ~/.claudecluster/node-id for migration.
    * Format: hostname-shortid (e.g., "rog2-8e800054")
    */
   private getOrCreateNodeId(): string {
@@ -184,30 +185,35 @@ export class ClaudeCluster extends EventEmitter {
     const nodePath = require('path');
 
     const homeDir = process.env.HOME || os.homedir();
-    const configDir = nodePath.join(homeDir, '.claudecluster');
-    const nodeIdFile = nodePath.join(configDir, 'node-id');
+    const newConfigDir = nodePath.join(homeDir, '.cortex');
+    const oldConfigDir = nodePath.join(homeDir, '.claudecluster');
 
-    // Try to read existing node ID
-    try {
-      const existingId = fs.readFileSync(nodeIdFile, 'utf-8').trim();
-      if (existingId) {
-        const hostname = os.hostname().split('.')[0]; // Get short hostname
-        const suffix = this.mcpMode ? '-mcp' : '';
-        return `${hostname}-${existingId}${suffix}`;
-      }
-    } catch {
-      // File doesn't exist or can't be read, create new ID
+    // Check new path first, then fall back to old path for migration
+    for (const configDir of [newConfigDir, oldConfigDir]) {
+      const nodeIdFile = nodePath.join(configDir, 'node-id');
+      try {
+        const existingId = fs.readFileSync(nodeIdFile, 'utf-8').trim();
+        if (existingId) {
+          // If found in old dir, copy to new dir
+          if (configDir === oldConfigDir) {
+            try {
+              fs.mkdirSync(newConfigDir, { recursive: true });
+              fs.writeFileSync(nodePath.join(newConfigDir, 'node-id'), existingId);
+            } catch { /* best effort migration */ }
+          }
+          const hostname = os.hostname().split('.')[0];
+          const suffix = this.mcpMode ? '-mcp' : '';
+          return `${hostname}-${existingId}${suffix}`;
+        }
+      } catch { /* try next */ }
     }
 
-    // Generate new short ID
+    // Generate new short ID, write to new path
     const shortId = randomUUID().slice(0, 8);
-
-    // Ensure config directory exists
     try {
-      fs.mkdirSync(configDir, { recursive: true });
-      fs.writeFileSync(nodeIdFile, shortId);
+      fs.mkdirSync(newConfigDir, { recursive: true });
+      fs.writeFileSync(nodePath.join(newConfigDir, 'node-id'), shortId);
     } catch (error) {
-      // If we can't write, just use the generated ID (won't persist)
       console.warn('Could not persist node ID:', error);
     }
 
@@ -254,7 +260,7 @@ export class ClaudeCluster extends EventEmitter {
     if (transports.length === 0) {
       transports.push(
         new winston.transports.File({
-          filename: '/tmp/claudecluster.log',
+          filename: '/tmp/cortex.log',
           format: winston.format.combine(
             winston.format.timestamp(),
             winston.format.json()
@@ -280,7 +286,7 @@ export class ClaudeCluster extends EventEmitter {
       this.logger.info('Starting in isolated mode (no cluster connection)');
       if (!this.mcpMode) {
         console.log('\n' + '='.repeat(60));
-        console.log('  Claude Cluster - ISOLATED MODE');
+        console.log('  Cortex - ISOLATED MODE');
         console.log('='.repeat(60));
         console.log('  Not connected to any cluster.');
         console.log('  Use --invisible or no flags to join the cluster.');
@@ -291,7 +297,7 @@ export class ClaudeCluster extends EventEmitter {
     }
 
     const modeStr = this.config.mode?.invisible ? ' (invisible mode)' : '';
-    this.logger.info(`Starting Claude Cluster${modeStr}`, {
+    this.logger.info(`Starting Cortex${modeStr}`, {
       nodeId: this.nodeId,
       clusterId: this.config.cluster.id,
     });
@@ -346,7 +352,7 @@ export class ClaudeCluster extends EventEmitter {
 
         await this.initializeMcp();
         this.running = true;
-        this.logger.info('Claude Cluster started successfully');
+        this.logger.info('Cortex started successfully');
         this.emit('started');
       }
     } catch (error) {
@@ -357,7 +363,7 @@ export class ClaudeCluster extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    this.logger.info('Stopping Claude Cluster');
+    this.logger.info('Stopping Cortex');
 
     // Stop MCP server
     if (this.mcpServer) {
@@ -420,7 +426,7 @@ export class ClaudeCluster extends EventEmitter {
     }
 
     this.running = false;
-    this.logger.info('Claude Cluster stopped');
+    this.logger.info('Cortex stopped');
     this.emit('stopped');
   }
 
@@ -492,7 +498,7 @@ export class ClaudeCluster extends EventEmitter {
 
     // Raft consensus (MCP process is non-voting observer only)
     const os = require('os');
-    const configDir = require('path').join(process.env.HOME || os.homedir(), '.claudecluster');
+    const configDir = require('path').join(process.env.HOME || os.homedir(), '.cortex');
     this.raft = new RaftNode({
       nodeId: this.nodeId,
       logger: this.logger,
@@ -705,7 +711,7 @@ export class ClaudeCluster extends EventEmitter {
 
     const inboxPath = msgConfig.inboxPath
       ? msgConfig.inboxPath.replace('~', os.homedir())
-      : path.join(os.homedir(), '.claudecluster', 'inbox');
+      : path.join(os.homedir(), '.cortex', 'inbox');
     this.inbox = new Inbox(inboxPath);
 
     this.messagingGateway = new MessagingGateway({
@@ -1074,7 +1080,7 @@ export class ClaudeCluster extends EventEmitter {
 // so stdio is clean for MCP communication
 async function runMcpServer(config: ClusterConfig, options: { seed?: string; verbose?: boolean; port?: string }): Promise<void> {
   // Force logging to file only (MCP uses stdio)
-  config.logging.file = '/tmp/claudecluster-mcp.log';
+  config.logging.file = '/tmp/cortex-mcp.log';
 
   // Apply CLI overrides
   if (options.port) {
@@ -1097,7 +1103,7 @@ async function runMcpServer(config: ClusterConfig, options: { seed?: string; ver
   };
 
   // Create cluster with file-only logging
-  const cluster = new ClaudeCluster(config, { mcpMode: true });
+  const cluster = new Cortex(config, { mcpMode: true });
 
   // Handle shutdown
   process.on('SIGINT', async () => {
@@ -1117,15 +1123,15 @@ async function runMcpServer(config: ClusterConfig, options: { seed?: string; ver
 // CLI entry point
 function showBanner(): void {
   const banner = `
-${chalk.cyan(`   _____ _                 _        _____ _           _
-  / ____| |               | |      / ____| |         | |
- | |    | | __ _ _   _  __| | ___ | |    | |_   _ ___| |_ ___ _ __
- | |    | |/ _\` | | | |/ _\` |/ _ \\| |    | | | | / __| __/ _ \\ '__|
- | |____| | (_| | |_| | (_| |  __/| |____| | |_| \\__ \\ ||  __/ |
-  \\_____|_|\\__,_|\\__,_|\\__,_|\\___| \\_____|_|\\__,_|___/\\__\\___|_|   `)}
+${chalk.cyan(`   _____ ___  ____ _____ _______  __
+  / ____/ __ \\|  _ \\_   _|  ____\\ \\/ /
+ | |   | |  | | |_) || | | |__   \\  /
+ | |   | |  | |  _ < | | |  __|  /  \\
+ | |___| |__| | |_) || |_| |____/ /\\ \\
+  \\_____\\____/|____/_____|______/_/  \\_\\`)}
 
         ${chalk.magenta('╔═══════════════════════════════════════╗')}
-        ${chalk.magenta('║')}   ${chalk.white.bold('P2P Compute Mesh')} ${chalk.cyan('◈')} ${chalk.yellow('Distributed AI')}   ${chalk.magenta('║')}
+        ${chalk.magenta('║')}   ${chalk.white.bold('Distributed AI Mesh')} ${chalk.cyan('◈')} ${chalk.yellow('Raft + gRPC')}    ${chalk.magenta('║')}
         ${chalk.magenta('╚═══════════════════════════════════════╝')}
 `;
   console.log(banner);
@@ -1135,8 +1141,8 @@ async function main(): Promise<void> {
   const program = new Command();
 
   program
-    .name('claudecluster')
-    .description('Peer-to-peer compute mesh for Claude sessions')
+    .name('cortex')
+    .description('Distributed AI mesh with Raft consensus and MCP integration')
     .version('0.1.0')
     .option('-c, --config <path>', 'Path to configuration file', 'config/default.yaml')
     .option('--mcp', 'Run as MCP server only (for Claude Code integration)')
@@ -1191,7 +1197,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const cluster = new ClaudeCluster(config);
+  const cluster = new Cortex(config);
 
   // Handle shutdown signals
   process.on('SIGINT', async () => {
@@ -1212,12 +1218,12 @@ async function main(): Promise<void> {
   // If not isolated, show ready message
   if (!config.mode.isolated) {
     const modeStr = config.mode.invisible ? ' (invisible)' : '';
-    console.log(`\nClaude Cluster node ready${modeStr}. Press Ctrl+C to exit.\n`);
+    console.log(`\nCortex node ready${modeStr}. Press Ctrl+C to exit.\n`);
   }
 }
 
 // Export for programmatic use
-export { ClaudeCluster as default };
+export { Cortex as default };
 
 // Run if executed directly
 const isMain = process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index.ts');
