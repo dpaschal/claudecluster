@@ -178,27 +178,36 @@ export class SharedMemoryDB {
       CREATE TABLE IF NOT EXISTS infra_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_type TEXT NOT NULL,
+        occurred_at TEXT,
+        build_id INTEGER,
+        test_id INTEGER,
+        details TEXT DEFAULT '{}',
         source TEXT,
-        data TEXT DEFAULT '{}',
         created_at TEXT DEFAULT (datetime('now'))
       );
 
       CREATE TABLE IF NOT EXISTS infra_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT,
-        node_id TEXT,
         started_at TEXT DEFAULT (datetime('now')),
         ended_at TEXT,
-        metadata TEXT DEFAULT '{}'
+        focus_area TEXT,
+        summary TEXT,
+        builds_created TEXT, -- JSON array
+        documents_modified TEXT, -- JSON array
+        commands_executed INTEGER,
+        files_modified INTEGER,
+        session_notes_content TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
       );
 
       CREATE TABLE IF NOT EXISTS infra_secrets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
+        service TEXT,
         value TEXT NOT NULL,
-        environment TEXT,
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
+        notes TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
       );
 
       -- ============================================================
@@ -207,12 +216,13 @@ export class SharedMemoryDB {
 
       CREATE TABLE IF NOT EXISTS task_agent_tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT,
         task_type TEXT,
+        description TEXT,
+        started_at TEXT,
+        completed_at TEXT,
         status TEXT DEFAULT 'pending',
-        priority INTEGER DEFAULT 0,
-        payload TEXT DEFAULT '{}',
-        result TEXT,
-        assigned_to TEXT,
+        parent_agent_id TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
       );

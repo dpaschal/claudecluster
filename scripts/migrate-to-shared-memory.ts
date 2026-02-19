@@ -16,6 +16,8 @@ import Database from 'better-sqlite3';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import winston from 'winston';
+import { SharedMemoryDB } from '../src/memory/shared-memory-db.js';
 
 const { Pool } = pg;
 
@@ -34,13 +36,12 @@ async function main() {
   console.log(`Dry run: ${dryRun}`);
   console.log('');
 
-  // Open or create the shared-memory.db (schema is created by SharedMemoryDB constructor)
-  // But here we import directly since this is a standalone script
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  // Use SharedMemoryDB to create/open the DB with proper schema
+  const logger = winston.createLogger({ silent: true });
+  const sharedDb = new SharedMemoryDB({ dataDir: DATA_DIR, logger });
 
-  const db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
+  // Get the underlying better-sqlite3 handle for migration
+  const db = sharedDb.getDatabase();
   db.pragma('foreign_keys = OFF'); // During migration
 
   // --- Cerebrus PostgreSQL ---
@@ -142,7 +143,7 @@ async function main() {
   }
 
   db.pragma('foreign_keys = ON');
-  db.close();
+  sharedDb.close();
 
   console.log('\n=== Migration complete ===');
   const stat = fs.statSync(DB_PATH);
