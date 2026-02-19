@@ -53,7 +53,7 @@ function createTailscaleStatus(options: {
     selfHostname = 'my-host',
     selfIp = '100.0.0.1',
     selfOnline = true,
-    selfTags = ['tag:claudecluster'],
+    selfTags = ['tag:cortex'],
     peers = [],
   } = options;
 
@@ -65,7 +65,7 @@ function createTailscaleStatus(options: {
       TailscaleIPs: [peer.ip],
       Online: peer.online,
       OS: peer.os ?? 'linux',
-      Tags: peer.tags ?? ['tag:claudecluster'],
+      Tags: peer.tags ?? ['tag:cortex'],
       LastSeen: peer.lastSeen ?? '2024-01-01T00:00:00Z',
     };
   }
@@ -226,7 +226,7 @@ describe('TailscaleDiscovery', () => {
 
       mockExecResponse(createTailscaleStatus({
         peers: [
-          { id: 'peer-1', hostname: 'cluster-node', ip: '100.0.0.2', online: true, tags: ['tag:claudecluster'] },
+          { id: 'peer-1', hostname: 'cluster-node', ip: '100.0.0.2', online: true, tags: ['tag:cortex'] },
           { id: 'peer-2', hostname: 'non-cluster-node', ip: '100.0.0.3', online: true, tags: ['tag:other'] },
           { id: 'peer-3', hostname: 'untagged-node', ip: '100.0.0.4', online: true, tags: [] },
         ],
@@ -244,8 +244,8 @@ describe('TailscaleDiscovery', () => {
 
       mockExecResponse(createTailscaleStatus({
         peers: [
-          { id: 'peer-1', hostname: 'online-node', ip: '100.0.0.2', online: true, tags: ['tag:claudecluster'] },
-          { id: 'peer-2', hostname: 'offline-node', ip: '100.0.0.3', online: false, tags: ['tag:claudecluster'] },
+          { id: 'peer-1', hostname: 'online-node', ip: '100.0.0.2', online: true, tags: ['tag:cortex'] },
+          { id: 'peer-2', hostname: 'offline-node', ip: '100.0.0.3', online: false, tags: ['tag:cortex'] },
         ],
       }));
 
@@ -261,9 +261,9 @@ describe('TailscaleDiscovery', () => {
 
       mockExecResponse(createTailscaleStatus({
         selfHostname: 'my-host',
-        selfTags: ['tag:claudecluster'],
+        selfTags: ['tag:cortex'],
         peers: [
-          { id: 'peer-1', hostname: 'other-node', ip: '100.0.0.2', online: true, tags: ['tag:claudecluster'] },
+          { id: 'peer-1', hostname: 'other-node', ip: '100.0.0.2', online: true, tags: ['tag:cortex'] },
         ],
       }));
 
@@ -307,7 +307,7 @@ describe('TailscaleDiscovery', () => {
 
       mockExecResponse(createTailscaleStatus({
         peers: [
-          { id: 'peer-1', hostname: 'new-node', ip: '100.0.0.2', online: true, tags: ['tag:claudecluster'] },
+          { id: 'peer-1', hostname: 'new-node', ip: '100.0.0.2', online: true, tags: ['tag:cortex'] },
         ],
       }));
 
@@ -329,7 +329,7 @@ describe('TailscaleDiscovery', () => {
       // First poll - node is offline
       mockExecResponse(createTailscaleStatus({
         peers: [
-          { id: 'peer-1', hostname: 'node1', ip: '100.0.0.2', online: false, tags: ['tag:claudecluster'] },
+          { id: 'peer-1', hostname: 'node1', ip: '100.0.0.2', online: false, tags: ['tag:cortex'] },
         ],
       }));
 
@@ -339,7 +339,7 @@ describe('TailscaleDiscovery', () => {
       // Second poll - node comes online
       mockExecResponse(createTailscaleStatus({
         peers: [
-          { id: 'peer-1', hostname: 'node1', ip: '100.0.0.2', online: true, tags: ['tag:claudecluster'] },
+          { id: 'peer-1', hostname: 'node1', ip: '100.0.0.2', online: true, tags: ['tag:cortex'] },
         ],
       }));
 
@@ -360,7 +360,7 @@ describe('TailscaleDiscovery', () => {
       // First poll - node is online (and will be discovered)
       mockExecResponse(createTailscaleStatus({
         peers: [
-          { id: 'peer-1', hostname: 'node1', ip: '100.0.0.2', online: true, tags: ['tag:claudecluster'] },
+          { id: 'peer-1', hostname: 'node1', ip: '100.0.0.2', online: true, tags: ['tag:cortex'] },
         ],
       }));
 
@@ -369,7 +369,7 @@ describe('TailscaleDiscovery', () => {
       // Second poll - node goes offline
       mockExecResponse(createTailscaleStatus({
         peers: [
-          { id: 'peer-1', hostname: 'node1', ip: '100.0.0.2', online: false, tags: ['tag:claudecluster'] },
+          { id: 'peer-1', hostname: 'node1', ip: '100.0.0.2', online: false, tags: ['tag:cortex'] },
         ],
       }));
 
@@ -390,7 +390,7 @@ describe('TailscaleDiscovery', () => {
       // First poll - node exists
       mockExecResponse(createTailscaleStatus({
         peers: [
-          { id: 'peer-1', hostname: 'disappearing-node', ip: '100.0.0.2', online: true, tags: ['tag:claudecluster'] },
+          { id: 'peer-1', hostname: 'disappearing-node', ip: '100.0.0.2', online: true, tags: ['tag:cortex'] },
         ],
       }));
 

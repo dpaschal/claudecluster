@@ -154,7 +154,7 @@ function createMockScheduler() {
 function createMockK8sAdapter() {
   return {
     listClusters: vi.fn().mockReturnValue([createMockK8sCluster()]),
-    submitJob: vi.fn().mockResolvedValue('claudecluster-123456'),
+    submitJob: vi.fn().mockResolvedValue('cortex-123456'),
     getClusterResources: vi.fn().mockResolvedValue({
       totalCpu: 16,
       totalMemory: 32 * 1024 * 1024 * 1024,
@@ -411,7 +411,7 @@ describe('MCP Tools', () => {
       const result = await tool.handler({ action: 'add' }) as Record<string, unknown>;
 
       expect(result.message).toContain('To add nodes');
-      expect(result.clusterTag).toBe('claudecluster');
+      expect(result.clusterTag).toBe('cortex');
     });
 
     it('scale_cluster should remove nodes', async () => {

@@ -422,7 +422,7 @@ describe('KubernetesAdapter', () => {
             metadata: expect.objectContaining({
               name: 'test-job',
               labels: expect.objectContaining({
-                'app.kubernetes.io/managed-by': 'claudecluster',
+                'app.kubernetes.io/managed-by': 'cortex',
                 app: 'test-app',
               }),
             }),
