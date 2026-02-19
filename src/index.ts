@@ -26,6 +26,18 @@ import { createClusterServiceHandlers, createRaftServiceHandlers, createAgentSer
 import { Command } from 'commander';
 import { randomUUID } from 'crypto';
 import chalk from 'chalk';
+import * as os from 'os';
+import { MessagingGateway } from './messaging/gateway.js';
+import { Inbox } from './messaging/inbox.js';
+import { DiscordAdapter } from './messaging/channels/discord.js';
+import { TelegramAdapter } from './messaging/channels/telegram.js';
+import { ProviderRouter } from './providers/router.js';
+import { AnthropicProvider } from './providers/anthropic.js';
+import { OpenAIProvider } from './providers/openai.js';
+import { OllamaProvider } from './providers/ollama.js';
+import { SkillLoader } from './skills/loader.js';
+import type { ChannelAdapter } from './messaging/types.js';
+import type { LLMProvider } from './providers/types.js';
 
 export interface ClusterModeOptions {
   invisible?: boolean;  // Can see cluster but isn't announced
@@ -96,6 +108,27 @@ export interface ClusterConfig {
     serverName: string;
     serverVersion: string;
   };
+  messaging?: {
+    enabled: boolean;
+    agent?: string;
+    inboxPath?: string;
+    channels?: {
+      discord?: { enabled: boolean; token?: string; guildId?: string };
+      telegram?: { enabled: boolean; token?: string };
+    };
+  };
+  providers?: {
+    primary: string;
+    fallback?: string[];
+    anthropic?: { model?: string; apiKey?: string };
+    openai?: { model?: string; apiKey?: string; baseUrl?: string };
+    ollama?: { model?: string; baseUrl?: string };
+  };
+  skills?: {
+    enabled: boolean;
+    directories?: string[];
+    hotReload?: boolean;
+  };
   seeds?: Array<{ address: string }>;
 }
 
@@ -123,6 +156,10 @@ export class ClaudeCluster extends EventEmitter {
   private authzManager: AuthzManager | null = null;
   private secretsManager: SecretsManager | null = null;
   private announcer: ClusterAnnouncer | null = null;
+  private messagingGateway: MessagingGateway | null = null;
+  private inbox: Inbox | null = null;
+  private providerRouter: ProviderRouter | null = null;
+  private skillLoader: SkillLoader | null = null;
 
   private running = false;
   private mcpMode = false;
@@ -279,6 +316,11 @@ export class ClaudeCluster extends EventEmitter {
       // Initialize Kubernetes
       await this.initializeKubernetes();
 
+      // Initialize OpenClaw-absorbed features
+      await this.initializeProviders();
+      await this.initializeMessaging();
+      await this.initializeSkills();
+
       // Join or create cluster
       await this.joinOrCreateCluster();
 
@@ -301,6 +343,16 @@ export class ClaudeCluster extends EventEmitter {
     // Stop MCP server
     if (this.mcpServer) {
       await this.mcpServer.stop();
+    }
+
+    // Stop messaging gateway
+    if (this.messagingGateway) {
+      await this.messagingGateway.stop();
+    }
+
+    // Stop skill loader watchers
+    if (this.skillLoader) {
+      this.skillLoader.stop();
     }
 
     // Stop scheduler
@@ -564,6 +616,104 @@ export class ClaudeCluster extends EventEmitter {
     } catch (error) {
       this.logger.warn('Failed to discover Kubernetes clusters', { error });
     }
+  }
+
+  private async initializeProviders(): Promise<void> {
+    const provConfig = this.config.providers;
+    if (!provConfig) return;
+
+    const providers: Record<string, LLMProvider> = {};
+    if (provConfig.anthropic?.apiKey) {
+      providers.anthropic = new AnthropicProvider({
+        apiKey: provConfig.anthropic.apiKey,
+        model: provConfig.anthropic.model,
+      });
+    }
+    if (provConfig.openai?.apiKey) {
+      providers.openai = new OpenAIProvider({
+        apiKey: provConfig.openai.apiKey,
+        model: provConfig.openai.model,
+      });
+    }
+    if (provConfig.ollama) {
+      providers.ollama = new OllamaProvider({
+        baseUrl: provConfig.ollama.baseUrl,
+        model: provConfig.ollama.model,
+      });
+    }
+
+    const primary = providers[provConfig.primary];
+    if (!primary) return;
+
+    const fallback = (provConfig.fallback ?? [])
+      .map(name => providers[name])
+      .filter((p): p is LLMProvider => Boolean(p));
+
+    this.providerRouter = new ProviderRouter({ primary, fallback });
+    this.logger.info('Provider router initialized', {
+      primary: provConfig.primary,
+      fallback: provConfig.fallback,
+    });
+  }
+
+  private async initializeMessaging(): Promise<void> {
+    const msgConfig = this.config.messaging;
+    if (!msgConfig?.enabled) return;
+
+    const adapters: ChannelAdapter[] = [];
+
+    if (msgConfig.channels?.discord?.enabled && msgConfig.channels.discord.token) {
+      adapters.push(new DiscordAdapter({
+        token: msgConfig.channels.discord.token,
+        guildId: msgConfig.channels.discord.guildId,
+      }));
+    }
+
+    if (msgConfig.channels?.telegram?.enabled && msgConfig.channels.telegram.token) {
+      adapters.push(new TelegramAdapter({
+        token: msgConfig.channels.telegram.token,
+      }));
+    }
+
+    if (adapters.length === 0) {
+      this.logger.warn('Messaging enabled but no channels configured');
+      return;
+    }
+
+    const inboxPath = msgConfig.inboxPath
+      ? msgConfig.inboxPath.replace('~', os.homedir())
+      : path.join(os.homedir(), '.claudecluster', 'inbox');
+    this.inbox = new Inbox(inboxPath);
+
+    this.messagingGateway = new MessagingGateway({
+      adapters,
+      raft: this.raft!,
+      agentName: msgConfig.agent ?? 'Cipher',
+      onMessage: async (message) => {
+        await this.inbox!.writeMessage({
+          from: `${message.channelType}:${message.username}`,
+          to: msgConfig.agent ?? 'Cipher',
+          content: message.content,
+          type: 'info',
+        });
+        this.logger.info('Incoming message', { channel: message.channelType, from: message.username });
+      },
+    });
+
+    this.logger.info('Messaging gateway initialized', {
+      agent: msgConfig.agent,
+      channels: adapters.map(a => a.name),
+    });
+  }
+
+  private async initializeSkills(): Promise<void> {
+    const skillConfig = this.config.skills;
+    if (!skillConfig?.enabled) return;
+
+    const dirs = (skillConfig.directories ?? []).map(d => d.replace('~', os.homedir()));
+    this.skillLoader = new SkillLoader(dirs);
+    await this.skillLoader.loadAll();
+    this.logger.info('Skills loaded', { count: this.skillLoader.listSkills().length });
   }
 
   private async joinOrCreateCluster(): Promise<void> {

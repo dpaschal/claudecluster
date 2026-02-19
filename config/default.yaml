@@ -130,6 +130,42 @@ mcp:
   serverName: claudecluster
   serverVersion: "0.1.0"
 
+# Messaging gateway (absorbed from OpenClaw)
+messaging:
+  enabled: false
+  agent: "Cipher"
+  inboxPath: ~/.claudecluster/inbox
+  channels:
+    discord:
+      enabled: false
+      token: ""
+      guildId: ""
+    telegram:
+      enabled: false
+      token: ""
+
+# LLM provider routing (multi-provider with fallback)
+providers:
+  primary: anthropic
+  fallback:
+    - ollama
+  anthropic:
+    model: claude-sonnet-4-6
+    apiKey: ""
+  openai:
+    model: gpt-4o
+    apiKey: ""
+  ollama:
+    model: llama3
+    baseUrl: http://localhost:11434
+
+# SKILL.md skill system
+skills:
+  enabled: false
+  directories:
+    - ~/.claudecluster/skills
+  hotReload: false
+
 # Initial seed nodes for joining an existing cluster
 # NOTE: Don't list ALL nodes here - list nodes that should already be running
 # The first node to start becomes leader, others join via seeds
