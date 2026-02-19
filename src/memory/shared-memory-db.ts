@@ -289,8 +289,18 @@ export class SharedMemoryDB {
   // Write Methods (local only — use MemoryReplicator for replicated writes)
   // ================================================================
 
+  private shouldSnapshot(sql: string): boolean {
+    const lower = sql.toLowerCase();
+    return lower.includes('timeline_') || lower.includes('_context');
+  }
+
   run(sql: string, params: unknown[] = []): { changes: number; lastInsertRowid: number | bigint } {
     const result = this.db.prepare(sql).run(...params);
+    if (this.shouldSnapshot(sql)) {
+      try { this.generateWhereami(); } catch (e) {
+        this.logger.warn('Failed to generate whereami snapshot', { error: e });
+      }
+    }
     return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
   }
 
@@ -301,6 +311,11 @@ export class SharedMemoryDB {
       }
     });
     transaction();
+    if (statements.some(s => this.shouldSnapshot(s.sql))) {
+      try { this.generateWhereami(); } catch (e) {
+        this.logger.warn('Failed to generate whereami snapshot', { error: e });
+      }
+    }
   }
 
   // ================================================================

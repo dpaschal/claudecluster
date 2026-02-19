@@ -207,4 +207,46 @@ describe('SharedMemoryDB', () => {
       expect(content).toContain('No active threads');
     });
   });
+
+  describe('auto-snapshot on write', () => {
+    it('regenerates whereami.md on timeline write', () => {
+      db.run('INSERT INTO timeline_threads (name, status) VALUES (?, ?)', ['Auto Thread', 'active']);
+
+      const mdPath = path.join(tmpDir, 'whereami.md');
+      expect(fs.existsSync(mdPath)).toBe(true);
+      const content = fs.readFileSync(mdPath, 'utf-8');
+      expect(content).toContain('Auto Thread');
+    });
+
+    it('regenerates whereami.md on context write', () => {
+      db.run(`INSERT INTO timeline_context (key, value, category, pinned) VALUES (?, ?, ?, ?)`,
+        ['test:key', '"hello"', 'fact', 1]);
+
+      const content = fs.readFileSync(path.join(tmpDir, 'whereami.md'), 'utf-8');
+      expect(content).toContain('test:key');
+    });
+
+    it('does NOT regenerate on non-timeline write', () => {
+      // Write to network table — should not trigger snapshot
+      db.run('INSERT INTO network_clients (hostname, ip_address) VALUES (?, ?)', ['testhost', '10.0.0.1']);
+
+      const mdPath = path.join(tmpDir, 'whereami.md');
+      // File may or may not exist (from other tests), but if it does,
+      // it should NOT contain 'testhost' since network_clients isn't a trigger
+      if (fs.existsSync(mdPath)) {
+        const content = fs.readFileSync(mdPath, 'utf-8');
+        expect(content).not.toContain('testhost');
+      }
+    });
+
+    it('regenerates on runInTransaction with timeline statements', () => {
+      db.runInTransaction([
+        { sql: 'INSERT INTO timeline_threads (name, status) VALUES (?, ?)', params: ['TX Thread', 'active'] },
+        { sql: 'INSERT INTO timeline_thoughts (thread_id, content, thought_type) VALUES (?, ?, ?)', params: [1, 'TX thought', 'progress'] },
+      ]);
+
+      const content = fs.readFileSync(path.join(tmpDir, 'whereami.md'), 'utf-8');
+      expect(content).toContain('TX Thread');
+    });
+  });
 });
