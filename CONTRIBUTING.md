@@ -83,17 +83,39 @@ Use the [feature request template](https://github.com/dpaschal/cortex/issues/new
 cortex/
 ├── src/
 │   ├── agent/       # Node agent (monitoring, execution)
-│   ├── cluster/     # Raft, scheduling, membership
+│   ├── cluster/     # Raft, scheduling, membership, ISSU
 │   ├── discovery/   # Tailscale, node approval
 │   ├── grpc/        # gRPC server/client
 │   ├── kubernetes/  # K8s adapter
-│   ├── mcp/         # MCP server and tools
-│   └── security/    # Auth, secrets
+│   ├── mcp/         # MCP server and tool/resource factories
+│   ├── memory/      # SharedMemoryDB, Raft replication
+│   ├── messaging/   # Gateway, Discord/Telegram, inbox
+│   ├── plugins/     # Plugin architecture (7 built-in plugins)
+│   ├── security/    # Auth, secrets
+│   └── skills/      # SKILL.md loader
 ├── proto/           # Protocol Buffer definitions
 ├── config/          # Configuration files
-├── docs/            # Documentation
-└── tests/           # Test files
+├── docs/            # Documentation and design plans
+└── tests/           # Test files (474+ tests)
 ```
+
+### Writing a Plugin
+
+Plugins implement the `Plugin` interface from `src/plugins/types.ts`:
+
+```typescript
+interface Plugin {
+  name: string;
+  version: string;
+  init(ctx: PluginContext): Promise<void>;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  getTools?(): Map<string, ToolHandler>;
+  getResources?(): Map<string, ResourceHandler>;
+}
+```
+
+Add your plugin to the registry in `src/plugins/registry.ts` and add a config entry in `config/default.yaml`.
 
 ## Questions?
 
