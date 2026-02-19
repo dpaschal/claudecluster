@@ -27,7 +27,7 @@ async function main() {
     defaults: true,
     oneofs: true,
   });
-  const proto = grpc.loadPackageDefinition(packageDef).claudecluster;
+  const proto = grpc.loadPackageDefinition(packageDef).cortex;
 
   const client = new proto.ClusterService(
     'localhost:50051',
