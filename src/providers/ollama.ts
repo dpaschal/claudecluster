@@ -1,4 +1,9 @@
-import type { LLMProvider, ChatMessage, ChatOptions, ChatResponse, StreamChunk } from './types.js';
+import type { LLMProvider, ChatMessage, ChatOptions, ChatResponse, StreamChunk, ContentBlock } from './types.js';
+
+function contentToString(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  return content.filter(b => b.type === 'text').map(b => b.text ?? '').join('');
+}
 
 export interface OllamaProviderConfig {
   baseUrl?: string;
@@ -21,7 +26,7 @@ export class OllamaProvider implements LLMProvider {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: options?.model ?? this.defaultModel,
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        messages: messages.map(m => ({ role: m.role, content: contentToString(m.content) })),
         stream: false,
       }),
     });
@@ -53,7 +58,7 @@ export class OllamaProvider implements LLMProvider {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: options?.model ?? this.defaultModel,
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        messages: messages.map(m => ({ role: m.role, content: contentToString(m.content) })),
         stream: true,
       }),
     });

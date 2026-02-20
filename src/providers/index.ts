@@ -1,5 +1,5 @@
 // src/providers/index.ts
-export type { LLMProvider, ChatMessage, ChatOptions, ChatResponse, StreamChunk, ToolDefinition, ToolCall, TokenUsage } from './types.js';
+export type { LLMProvider, ChatMessage, ChatOptions, ChatResponse, StreamChunk, ToolDefinition, ToolCall, TokenUsage, ContentBlock } from './types.js';
 export { AnthropicProvider } from './anthropic.js';
 export type { AnthropicProviderConfig } from './anthropic.js';
 export { OpenAIProvider } from './openai.js';

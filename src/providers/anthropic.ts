@@ -23,10 +23,11 @@ export class AnthropicProvider implements LLMProvider {
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
     if (!this.client) throw new Error('Anthropic API key not configured');
 
-    const systemPrompt = options?.systemPrompt ?? messages.find(m => m.role === 'system')?.content;
+    const systemMessage = messages.find(m => m.role === 'system');
+    const systemPrompt = options?.systemPrompt ?? (systemMessage && typeof systemMessage.content === 'string' ? systemMessage.content : undefined);
     const chatMessages = messages
       .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content as Anthropic.MessageParam['content'] }));
 
     const sdkTools = options?.tools?.map(t => ({
       name: t.name,
@@ -66,10 +67,11 @@ export class AnthropicProvider implements LLMProvider {
   async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncGenerator<StreamChunk> {
     if (!this.client) throw new Error('Anthropic API key not configured');
 
-    const systemPrompt = options?.systemPrompt ?? messages.find(m => m.role === 'system')?.content;
+    const systemMessage = messages.find(m => m.role === 'system');
+    const systemPrompt = options?.systemPrompt ?? (systemMessage && typeof systemMessage.content === 'string' ? systemMessage.content : undefined);
     const chatMessages = messages
       .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content as Anthropic.MessageParam['content'] }));
 
     const stream = this.client.messages.stream({
       model: options?.model ?? this.defaultModel,

@@ -1,5 +1,10 @@
 import OpenAI from 'openai';
-import type { LLMProvider, ChatMessage, ChatOptions, ChatResponse, StreamChunk } from './types.js';
+import type { LLMProvider, ChatMessage, ChatOptions, ChatResponse, StreamChunk, ContentBlock } from './types.js';
+
+function contentToString(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  return content.filter(b => b.type === 'text').map(b => b.text ?? '').join('');
+}
 
 export interface OpenAIProviderConfig {
   apiKey?: string;
@@ -28,7 +33,7 @@ export class OpenAIProvider implements LLMProvider {
       model: options?.model ?? this.defaultModel,
       max_tokens: options?.maxTokens ?? 4096,
       temperature: options?.temperature,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: messages.map(m => ({ role: m.role, content: contentToString(m.content) })),
     });
 
     const choice = response.choices[0];
@@ -49,7 +54,7 @@ export class OpenAIProvider implements LLMProvider {
     const stream = await this.client.chat.completions.create({
       model: options?.model ?? this.defaultModel,
       max_tokens: options?.maxTokens ?? 4096,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: messages.map(m => ({ role: m.role, content: contentToString(m.content) })),
       stream: true,
     });
 
