@@ -888,11 +888,12 @@ export class Cortex extends EventEmitter {
       for (const seed of this.config.seeds) {
         // Skip if seed is our own address (check localhost, 127.0.0.1, our IP, and hostname)
         const seedHost = seed.address.split(':')[0];
+        const seedPort = seed.address.split(':')[1] || '50051';
+        const selfPort = String(this.config.node.grpcPort);
+        // Only skip if both host AND port match (MCP on :50052 should still seed off :50051)
         if (
-          seedHost === '127.0.0.1' ||
-          seedHost === 'localhost' ||
-          seedHost === selfIp ||
-          seedHost === selfHostname
+          (seedHost === '127.0.0.1' || seedHost === 'localhost' || seedHost === selfIp || seedHost === selfHostname) &&
+          seedPort === selfPort
         ) {
           this.logger.debug('Skipping self as seed', { seed: seed.address, selfIp, selfHostname });
           continue;
@@ -905,7 +906,9 @@ export class Cortex extends EventEmitter {
     if (this.tailscale) {
       const clusterNodes = this.tailscale.getClusterNodes();
       for (const node of clusterNodes) {
-        const address = `${node.ip}:${this.config.node.grpcPort}`;
+        // Use standard gRPC port (50051), not the local node's port
+        // (MCP process runs on 50052 but cluster nodes listen on 50051)
+        const address = `${node.ip}:50051`;
         // Skip if this is our own node
         if (node.hostname !== require('os').hostname()) {
           addresses.push({ address, source: `tailscale:${node.hostname}` });
