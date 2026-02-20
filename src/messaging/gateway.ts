@@ -41,7 +41,7 @@ export class MessagingGateway {
     });
   }
 
-  private async activate(): Promise<void> {
+  async activate(): Promise<void> {
     if (this.active) return;
     this.active = true;
     await Promise.allSettled(this.adapters.map(a => a.connect()));

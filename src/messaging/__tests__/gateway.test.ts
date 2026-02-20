@@ -75,4 +75,30 @@ describe('MessagingGateway', () => {
     expect(status.isActive).toBe(false);
     expect(status.channels).toHaveLength(2);
   });
+
+  it('should connect on stateChange to leader and disconnect on demotion to follower', async () => {
+    // Step 1: non-leader node — nothing connected yet
+    expect(discord.connect).not.toHaveBeenCalled();
+    expect(telegram.connect).not.toHaveBeenCalled();
+
+    // Step 2: become leader via stateChange
+    (raft.isLeader as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    raft.emit('stateChange', 'leader', 1);
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(discord.connect).toHaveBeenCalledTimes(1);
+    expect(telegram.connect).toHaveBeenCalledTimes(1);
+
+    // Step 3: mark adapters as connected so deactivate will disconnect them
+    (discord.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (telegram.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    // Step 4: demote to follower via stateChange
+    (raft.isLeader as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    raft.emit('stateChange', 'follower', 2);
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(discord.disconnect).toHaveBeenCalledTimes(1);
+    expect(telegram.disconnect).toHaveBeenCalledTimes(1);
+  });
 });
