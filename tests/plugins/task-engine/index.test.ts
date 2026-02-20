@@ -164,9 +164,9 @@ describe('TaskEnginePlugin', () => {
 
   // ── 2. Tool registration ─────────────────────────────────────
 
-  it('registers all 9 MCP tools after init', () => {
+  it('registers all 12 MCP tools after init', () => {
     const tools = plugin.getTools();
-    expect(tools.size).toBe(9);
+    expect(tools.size).toBe(12);
 
     const expectedTools = [
       'submit_task',
@@ -178,6 +178,9 @@ describe('TaskEnginePlugin', () => {
       'drain_node_tasks',
       'run_distributed',
       'dispatch_subagents',
+      'submit_workflow',
+      'list_workflows',
+      'get_workflow_status',
     ];
 
     for (const name of expectedTools) {

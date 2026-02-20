@@ -513,4 +513,18 @@ export class TaskStateMachine {
       .prepare('SELECT * FROM te_tasks WHERE workflow_id = ? ORDER BY created_at ASC')
       .all(workflowId) as TaskRecord[];
   }
+
+  listWorkflows(options?: { state?: import('./types.js').WorkflowState; limit?: number }): WorkflowRecord[] {
+    const limit = options?.limit ?? 100;
+
+    if (options?.state) {
+      return this.db.prepare(`
+        SELECT * FROM te_workflows WHERE state = ? ORDER BY created_at DESC LIMIT ?
+      `).all(options.state, limit) as WorkflowRecord[];
+    }
+
+    return this.db.prepare(`
+      SELECT * FROM te_workflows ORDER BY created_at DESC LIMIT ?
+    `).all(limit) as WorkflowRecord[];
+  }
 }

@@ -9,6 +9,9 @@ import type {
   RetryPolicy,
   TaskSubmitPayload,
   TaskEngineState,
+  WorkflowSubmitPayload,
+  WorkflowState,
+  WorkflowTaskDef,
 } from './types.js';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'winston';
@@ -235,6 +238,46 @@ export class TaskEnginePlugin implements Plugin {
         required: ['prompt', 'count'],
       },
       handler: async (args) => this.handleDispatchSubagents(args),
+    });
+
+    this.tools.set('submit_workflow', {
+      description: 'Submit a workflow DAG for execution on the cluster',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Workflow name' },
+          tasks: {
+            type: 'object',
+            description: 'Map of task key to task definition (type, spec, dependsOn, etc.)',
+          },
+        },
+        required: ['name', 'tasks'],
+      },
+      handler: async (args) => this.handleSubmitWorkflow(args),
+    });
+
+    this.tools.set('list_workflows', {
+      description: 'List workflows with optional state filter',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          state: { type: 'string', description: 'Filter by workflow state (pending, running, completed, failed, cancelled)' },
+          limit: { type: 'number', description: 'Maximum results (default 50)' },
+        },
+      },
+      handler: async (args) => this.handleListWorkflows(args),
+    });
+
+    this.tools.set('get_workflow_status', {
+      description: 'Get detailed status of a workflow including per-task states',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string', description: 'The workflow ID' },
+        },
+        required: ['workflowId'],
+      },
+      handler: async (args) => this.handleGetWorkflowStatus(args),
     });
   }
 
@@ -504,6 +547,83 @@ export class TaskEnginePlugin implements Plugin {
     }
 
     return { submitted: taskIds.length, count, taskIds };
+  }
+
+  // ── Workflow Tool Handlers ──────────────────────────────────────
+
+  private async handleSubmitWorkflow(args: Record<string, unknown>): Promise<unknown> {
+    const workflowId = randomUUID();
+    const name = args.name as string;
+    const tasks = args.tasks as Record<string, WorkflowTaskDef>;
+
+    const payload: WorkflowSubmitPayload = {
+      workflowId,
+      definition: { name, tasks },
+    };
+
+    const data = Buffer.from(JSON.stringify({ type: 'workflow_submit', payload }));
+    const result = await this.ctx.raft.appendEntry('workflow_submit', data);
+
+    if (!result.success) {
+      return { accepted: false, error: 'Failed to append Raft entry (not leader?)' };
+    }
+
+    return { accepted: true, workflowId };
+  }
+
+  private async handleListWorkflows(args: Record<string, unknown>): Promise<unknown> {
+    const limit = (args.limit as number) ?? 50;
+    const state = args.state as WorkflowState | undefined;
+
+    const workflows = this.stateMachine.listWorkflows({ state, limit });
+
+    return {
+      workflows: workflows.map((w) => ({
+        workflowId: w.id,
+        name: w.name,
+        state: w.state,
+        createdAt: w.created_at,
+        completedAt: w.completed_at,
+      })),
+      total: workflows.length,
+    };
+  }
+
+  private async handleGetWorkflowStatus(args: Record<string, unknown>): Promise<unknown> {
+    const workflowId = args.workflowId as string;
+    const workflow = this.stateMachine.getWorkflow(workflowId);
+
+    if (!workflow) {
+      return { error: `Workflow ${workflowId} not found` };
+    }
+
+    const workflowTasks = this.stateMachine.getWorkflowTasks(workflowId);
+    const tasks: Record<string, {
+      state: string;
+      assignedNode: string | null;
+      result: unknown;
+      error: string | null;
+    }> = {};
+
+    for (const t of workflowTasks) {
+      const key = t.task_key ?? t.id;
+      tasks[key] = {
+        state: t.state,
+        assignedNode: t.assigned_node,
+        result: t.result ? JSON.parse(t.result) : null,
+        error: t.error,
+      };
+    }
+
+    return {
+      workflowId: workflow.id,
+      name: workflow.name,
+      state: workflow.state,
+      tasks,
+      context: JSON.parse(workflow.context),
+      createdAt: workflow.created_at,
+      completedAt: workflow.completed_at,
+    };
   }
 
   // ── Raft Entry Handling ────────────────────────────────────────
