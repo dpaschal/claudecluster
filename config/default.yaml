@@ -163,9 +163,9 @@ messaging:
 
 # LLM provider routing (multi-provider with fallback)
 providers:
-  primary: anthropic
+  primary: ollama
   fallback:
-    - ollama
+    - anthropic
   anthropic:
     model: claude-sonnet-4-6
     apiKey: ""
@@ -173,8 +173,8 @@ providers:
     model: gpt-4o
     apiKey: ""
   ollama:
-    model: llama3
-    baseUrl: http://localhost:11434
+    model: qwen2.5:7b
+    baseUrl: http://100.103.240.34:11434
 
 # SKILL.md skill system
 skills:
