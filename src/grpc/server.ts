@@ -88,13 +88,44 @@ export class GrpcServer extends EventEmitter {
     // Check if port is already in use before attempting to bind
     const portCheck = await this.checkPortInUse(this.config.port);
     if (portCheck.inUse) {
-      const errorMessage = this.formatPortInUseError(this.config.port, portCheck);
-      this.config.logger.error('Port already in use', {
-        port: this.config.port,
-        pid: portCheck.pid,
-        process: portCheck.processName
-      });
-      throw new Error(errorMessage);
+      // Auto-kill stale cortex/node processes holding the port
+      if (portCheck.pid && (portCheck.processName?.includes('node') || portCheck.processName?.includes('cortex'))) {
+        this.config.logger.warn('Killing stale cortex process on port', {
+          port: this.config.port,
+          pid: portCheck.pid,
+          process: portCheck.processName,
+        });
+        try {
+          process.kill(portCheck.pid, 'SIGTERM');
+          // Wait up to 3 seconds for process to exit
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 100));
+            try { process.kill(portCheck.pid, 0); } catch { break; } // Process gone
+          }
+          // Verify port is free now
+          const recheck = await this.checkPortInUse(this.config.port);
+          if (recheck.inUse) {
+            // SIGTERM didn't work, try SIGKILL
+            this.config.logger.warn('SIGTERM failed, sending SIGKILL', { pid: portCheck.pid });
+            try { process.kill(portCheck.pid, 'SIGKILL'); } catch { /* already gone */ }
+            await new Promise(r => setTimeout(r, 500));
+          }
+          this.config.logger.info('Stale process cleared, continuing startup');
+        } catch (killError) {
+          // Can't kill (permission denied, already dead, etc.) — fall through to error
+          this.config.logger.error('Failed to kill stale process', { pid: portCheck.pid, error: killError });
+          const errorMessage = this.formatPortInUseError(this.config.port, portCheck);
+          throw new Error(errorMessage);
+        }
+      } else {
+        const errorMessage = this.formatPortInUseError(this.config.port, portCheck);
+        this.config.logger.error('Port already in use', {
+          port: this.config.port,
+          pid: portCheck.pid,
+          process: portCheck.processName
+        });
+        throw new Error(errorMessage);
+      }
     }
 
     return new Promise((resolve, reject) => {

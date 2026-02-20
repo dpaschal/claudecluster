@@ -91,6 +91,7 @@ export class RaftNode extends EventEmitter {
     this.running = true;
     this.loadState();
     this.becomeFollower(this.currentTerm);
+    this.resetElectionTimeout(); // Start initial election timer
     this.config.logger.info('Raft node started', { nodeId: this.config.nodeId, term: this.currentTerm });
   }
 
@@ -318,7 +319,14 @@ export class RaftNode extends EventEmitter {
     this.votedFor = null;
     this.clearTimers();
     this.saveState();
-    this.resetElectionTimeout();
+    // NOTE: Do NOT reset election timeout here.
+    // Per the Raft paper, the election timer should only be reset when:
+    //   1. Granting a vote to a candidate (handleRequestVote)
+    //   2. Receiving a valid AppendEntries from the current leader
+    //   3. Starting up (start())
+    // Resetting here caused election livelock: a node with a stale log
+    // could endlessly bump terms via RequestVote, resetting other nodes'
+    // timers and preventing better-qualified nodes from ever running.
 
     this.config.logger.info('Became follower', { term });
     this.emit('stateChange', 'follower', term);
