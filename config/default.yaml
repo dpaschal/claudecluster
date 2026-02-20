@@ -203,6 +203,7 @@ plugins:
     enabled: true
     agent: "Cipher"
     inboxPath: ~/.cortex/inbox
+    alertChatId: "527770390"  # Telegram chat ID for health alerts (or set CORTEX_ALERT_CHAT_ID)
     channels:
       telegram:
         enabled: true

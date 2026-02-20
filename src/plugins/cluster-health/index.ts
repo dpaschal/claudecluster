@@ -24,13 +24,15 @@ export class ClusterHealthPlugin implements Plugin {
   private lastAlertedTerm = 0;
   private lastLeaderCheck = 0;
   private noLeaderSince = 0;
+  private becameLeaderAt = 0;       // Timestamp when this node became leader
 
   // Config defaults
   private intervalMs = 15000;        // Check every 15s
   private termWindowMs = 300000;     // 5-minute window for term velocity
   private termVelocityThreshold = 5; // >5 elections in 5 min = alert
   private noLeaderAlertMs = 30000;   // Alert if no leader for 30s
-  private alertCooldownMs = 60000;   // Don't repeat same alert within 60s
+  private alertCooldownMs = 300000;  // Don't repeat same alert within 5 min
+  private leaderGracePeriodMs = 60000; // Wait 60s after becoming leader before alerting
   private lastAlerts: Map<string, number> = new Map();
 
   async init(ctx: PluginContext): Promise<void> {
@@ -122,7 +124,16 @@ export class ClusterHealthPlugin implements Plugin {
     // Only the leader sends alerts (avoids duplicate alerts from all nodes)
     if (!isLeader) {
       this.noLeaderSince = 0;
+      this.becameLeaderAt = 0;
       return;
+    }
+
+    // Track when we became leader — don't alert during grace period (rolling restarts)
+    if (this.becameLeaderAt === 0) {
+      this.becameLeaderAt = now;
+    }
+    if (now - this.becameLeaderAt < this.leaderGracePeriodMs) {
+      return; // Grace period — peers still catching up
     }
 
     const alerts: HealthAlert[] = [];
@@ -199,18 +210,23 @@ export class ClusterHealthPlugin implements Plugin {
       if (now - ts > this.alertCooldownMs * 2) this.lastAlerts.delete(key);
     }
 
-    const prefix = alert.level === 'critical' ? 'CRITICAL' : 'WARNING';
-    const msg = `[${prefix}] ${alert.message}`;
+    const prefix = alert.level === 'critical' ? '🔴 CRITICAL' : '⚠️ WARNING';
+    const msg = `${prefix}\n${alert.message}`;
 
     this.ctx.logger.warn('Cluster health alert', { level: alert.level, message: alert.message });
 
-    // Send via Telegram if messaging tools are available
-    const tools = this.ctx.getTools?.();
-    const sendTool = tools?.get('messaging_gateway_status');
-    // We can't easily send a Telegram message through the tool interface —
-    // but we CAN send it through the messaging plugin's adapter.
-    // For now, log the alert. The bot can be queried with cluster_health tool.
-    // TODO: Wire direct Telegram alerting via adapter reference or event bus
+    // Send via Telegram using messaging_notify tool
+    try {
+      const tools = this.ctx.getTools?.();
+      const notifyTool = tools?.get('messaging_notify');
+      if (notifyTool) {
+        await notifyTool.handler({ message: msg });
+      }
+    } catch (err) {
+      this.ctx.logger.error('Failed to send health alert via Telegram', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   private async getHealthReport(): Promise<Record<string, unknown>> {

@@ -25,10 +25,7 @@ export class MessagingPlugin implements Plugin {
   }
 
   async start(): Promise<void> {
-    if (!this.ctx?.provider) return; // No LLM provider, can't converse
-
-    const config = this.ctx.config;
-    const agentName = (config.agent as string) ?? 'Cipher';
+    const config = this.ctx?.config ?? {};
     const channels = config.channels as Record<string, any> | undefined;
     const telegramConfig = channels?.telegram;
     const telegramToken = telegramConfig?.token || process.env.TELEGRAM_BOT_TOKEN;
@@ -36,6 +33,31 @@ export class MessagingPlugin implements Plugin {
     if (!telegramConfig?.enabled || !telegramToken) return;
 
     this.telegramAdapter = new TelegramAdapter({ token: telegramToken });
+
+    // Expose messaging_notify tool — lets other plugins (e.g. cluster-health) send alerts
+    const alertChatId = (config.alertChatId as string) || process.env.CORTEX_ALERT_CHAT_ID || '';
+    if (alertChatId) {
+      const adapter = this.telegramAdapter;
+      this.tools.set('messaging_notify', {
+        description: 'Send a notification message to the configured Telegram alert channel',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            message: { type: 'string', description: 'The notification text to send' },
+          },
+          required: ['message'],
+        },
+        handler: async (args) => {
+          if (!adapter.isConnected()) return { sent: false, reason: 'Telegram not connected' };
+          await adapter.sendMessage(alertChatId, args.message as string);
+          return { sent: true };
+        },
+      });
+    }
+
+    if (!this.ctx?.provider) return; // No LLM provider, can't converse
+
+    const agentName = (config.agent as string) ?? 'Cipher';
 
     const allTools = this.ctx.getTools?.() ?? new Map();
     this.conversationHandler = new ConversationHandler({

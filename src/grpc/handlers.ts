@@ -163,17 +163,34 @@ export function createClusterServiceHandlers(config: ServiceHandlersConfig): grp
         const state = stateManager.getState();
         const s = (v: any) => (v ?? 0).toString();
 
+        // Build a set of Raft-alive peers (matchIndex > 0 = has replicated)
+        const raftAlive = new Set<string>();
+        if (raft.isLeader()) {
+          const commitIndex = raft.getCommitIndex();
+          for (const peer of raft.getPeers()) {
+            if (peer.matchIndex > 0 || commitIndex === 0) {
+              raftAlive.add(peer.nodeId);
+            }
+          }
+        }
+
         callback(null, {
           cluster_id: state.clusterId ?? '',
           leader_id: state.leaderId ?? '',
           term: s(state.term),
-          nodes: (state.nodes ?? []).map(n => ({
+          nodes: (state.nodes ?? []).map(n => {
+            // Override stale membership status with Raft liveness data
+            let status = n.status ?? 'unknown';
+            if (raftAlive.size > 0 && raftAlive.has(n.nodeId)) {
+              status = 'active';
+            }
+            return {
             node_id: n.nodeId ?? '',
             hostname: n.hostname ?? '',
             tailscale_ip: n.tailscaleIp ?? '',
             grpc_port: n.grpcPort ?? 50051,
             role: `NODE_ROLE_${(n.role ?? 'unknown').toUpperCase()}`,
-            status: `NODE_STATUS_${(n.status ?? 'unknown').toUpperCase()}`,
+            status: `NODE_STATUS_${status.toUpperCase()}`,
             resources: n.resources ? {
               cpu_cores: n.resources.cpuCores ?? 0,
               memory_bytes: s(n.resources.memoryBytes),
@@ -193,7 +210,7 @@ export function createClusterServiceHandlers(config: ServiceHandlersConfig): grp
             tags: n.tags ?? [],
             joined_at: s(n.joinedAt),
             last_seen: s(n.lastSeen),
-          })),
+          };}),
           total_resources: state.totalResources ? {
             cpu_cores: state.totalResources.cpuCores ?? 0,
             memory_bytes: s(state.totalResources.memoryBytes),
