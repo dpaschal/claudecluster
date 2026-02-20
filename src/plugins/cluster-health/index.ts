@@ -269,7 +269,7 @@ export class ClusterHealthPlugin implements Plugin {
       if (untilMs > 0) {
         db.run(
           `INSERT OR REPLACE INTO timeline_context (key, value, category, label, source, pinned, updated_at)
-           VALUES ('health_squelch_until', ?, 'system', 'Health Alert Squelch', 'cluster-health', 0, datetime('now'))`,
+           VALUES ('health_squelch_until', ?, 'machine', 'Health Alert Squelch', 'cluster-health', 0, datetime('now'))`,
           [String(untilMs)]
         );
       } else {

@@ -139,7 +139,7 @@ export function registerCliCommands(program: Command): void {
         const untilMs = mins > 0 ? Date.now() + (mins * 60000) : 0;
         const crypto = await import('crypto');
         const sql = mins > 0
-          ? `INSERT OR REPLACE INTO timeline_context (key, value, category, label, source, pinned, updated_at) VALUES ('health_squelch_until', ?, 'system', 'Health Alert Squelch', 'cortex-cli', 0, datetime('now'))`
+          ? `INSERT OR REPLACE INTO timeline_context (key, value, category, label, source, pinned, updated_at) VALUES ('health_squelch_until', ?, 'machine', 'Health Alert Squelch', 'cortex-cli', 0, datetime('now'))`
           : `DELETE FROM timeline_context WHERE key = 'health_squelch_until'`;
         const params = mins > 0 ? [String(untilMs)] : [];
         const paramsJson = JSON.stringify(params);
