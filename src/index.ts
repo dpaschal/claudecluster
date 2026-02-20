@@ -1108,7 +1108,7 @@ ${chalk.cyan(`   _____ ___  ____ _____ _______  __
 async function main(): Promise<void> {
   // Detect CLI subcommands before starting the daemon.
   // Known subcommands run the management CLI and exit.
-  const CLI_COMMANDS = ['status', 'switch-leader', 'help'];
+  const CLI_COMMANDS = ['status', 'switch-leader', 'squelch', 'help'];
   const firstArg = process.argv[2];
   if (firstArg && CLI_COMMANDS.includes(firstArg)) {
     const { registerCliCommands } = await import('./cli.js');

@@ -18,6 +18,8 @@ export interface UpdaterConfig {
   heartbeatIntervalMs?: number;
   /** Called before restarting a node — sends Telegram + wall notification, waits grace period. */
   notifyFn?: (nodeId: string, message: string) => Promise<void>;
+  /** Called to squelch/unsquelch health alerts during rolling updates. */
+  squelchFn?: (minutes: number) => Promise<void>;
   /** Grace period (ms) to wait after notification before restarting. Default: 30000. */
   preRestartGraceMs?: number;
 }
@@ -402,6 +404,18 @@ export class RollingUpdater extends EventEmitter {
       return { success: true, nodesUpdated, nodesRolledBack };
     }
 
+    // Auto-squelch health alerts for the duration of the rolling update
+    if (this.config.squelchFn) {
+      try {
+        // Estimate: ~2 min per follower + 1 min leader + buffer
+        const estimatedMinutes = Math.max(10, (preflight.followers.length + 1) * 3);
+        await this.config.squelchFn(estimatedMinutes);
+        this.progress('preflight', this.config.selfNodeId, `Health alerts squelched for ${estimatedMinutes} minutes`);
+      } catch {
+        // Non-fatal — continue without squelching
+      }
+    }
+
     // Phases 1-3: Upgrade each follower sequentially
     for (const follower of preflight.followers) {
       this.progress('add', follower.nodeId, `Starting upgrade (${nodesUpdated.length + 1}/${preflight.followers.length})`);
@@ -415,6 +429,10 @@ export class RollingUpdater extends EventEmitter {
       if (!result.success) {
         this.progress('aborted', this.config.selfNodeId,
           `Aborting rolling update: ${follower.nodeId} failed — ${result.error}`);
+        // Unsquelch alerts on abort so real issues are visible
+        if (this.config.squelchFn) {
+          try { await this.config.squelchFn(0); } catch { /* best effort */ }
+        }
         return {
           success: false,
           nodesUpdated,

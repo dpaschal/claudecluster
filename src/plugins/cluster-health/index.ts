@@ -30,6 +30,9 @@ export class ClusterHealthPlugin implements Plugin {
   private peerLastAlive: Map<string, number> = new Map(); // nodeId → timestamp when last seen alive
   private peerGracePeriodMs = 90000; // 90s grace — covers restart + rejoin + replication catch-up
 
+  // Alert squelch: suppress all alerts until this timestamp
+  private squelchedUntil = 0;
+
   // Config defaults
   private intervalMs = 15000;        // Check every 15s
   private termWindowMs = 300000;     // 5-minute window for term velocity
@@ -57,11 +60,24 @@ export class ClusterHealthPlugin implements Plugin {
         },
         handler: async () => this.getHealthReport(),
       }],
+      ['squelch_alerts', {
+        description: 'Suppress or unsquelch cluster health alerts. Use before maintenance (rolling restarts, etc.) to prevent alert spam.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            minutes: { type: 'number', description: 'Minutes to squelch alerts (0 to clear). Default: 30' },
+          },
+        },
+        handler: async (args: Record<string, unknown>) => this.squelchAlerts(args.minutes as number | undefined),
+      }],
     ]);
   }
 
   async start(): Promise<void> {
     if (!this.ctx) return;
+
+    // Load persisted squelch state (survives leader changes / restarts)
+    this.loadSquelch();
 
     // Record initial term
     this.recordTerm(this.ctx.raft.getCurrentTerm());
@@ -210,8 +226,97 @@ export class ClusterHealthPlugin implements Plugin {
     }
   }
 
+  private async squelchAlerts(minutes?: number): Promise<Record<string, unknown>> {
+    const mins = minutes ?? 30;
+    if (mins <= 0) {
+      this.squelchedUntil = 0;
+      await this.persistSquelch(0);
+      this.ctx?.logger.info('Alerts unsquelched');
+
+      // Notify via Telegram
+      try {
+        const tools = this.ctx?.getTools?.();
+        const notifyTool = tools?.get('messaging_notify');
+        if (notifyTool) {
+          await notifyTool.handler({ message: '🔔 Health alerts re-enabled.' });
+        }
+      } catch { /* best effort */ }
+
+      return { squelched: false, message: 'Alerts unsquelched — notifications re-enabled.' };
+    }
+    this.squelchedUntil = Date.now() + (mins * 60000);
+    const until = new Date(this.squelchedUntil).toISOString();
+    await this.persistSquelch(this.squelchedUntil);
+    this.ctx?.logger.info('Alerts squelched', { minutes: mins, until });
+
+    // Notify via Telegram
+    try {
+      const tools = this.ctx?.getTools?.();
+      const notifyTool = tools?.get('messaging_notify');
+      if (notifyTool) {
+        await notifyTool.handler({ message: `🔇 Health alerts squelched for ${mins} minutes (until ${until}).` });
+      }
+    } catch { /* best effort */ }
+
+    return { squelched: true, minutes: mins, until, message: `Alerts squelched for ${mins} minutes (until ${until}).` };
+  }
+
+  /** Persist squelch timestamp to shared memory (survives leader changes). */
+  private async persistSquelch(untilMs: number): Promise<void> {
+    if (!this.ctx) return;
+    try {
+      const db = this.ctx.sharedMemoryDb;
+      if (untilMs > 0) {
+        db.run(
+          `INSERT OR REPLACE INTO timeline_context (key, value, category, label, source, pinned, updated_at)
+           VALUES ('health_squelch_until', ?, 'system', 'Health Alert Squelch', 'cluster-health', 0, datetime('now'))`,
+          [String(untilMs)]
+        );
+      } else {
+        db.run(`DELETE FROM timeline_context WHERE key = 'health_squelch_until'`);
+      }
+    } catch (err) {
+      this.ctx.logger.warn('Failed to persist squelch state', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /** Load squelch state from shared memory (called on startup / leader change). */
+  private loadSquelch(): void {
+    if (!this.ctx) return;
+    try {
+      const row = this.ctx.sharedMemoryDb.queryOne<{ value: string }>(
+        `SELECT value FROM timeline_context WHERE key = 'health_squelch_until'`
+      );
+      if (row) {
+        const until = parseInt(row.value, 10);
+        if (until > Date.now()) {
+          this.squelchedUntil = until;
+          this.ctx.logger.info('Loaded squelch state from shared memory', {
+            until: new Date(until).toISOString(),
+          });
+        }
+      }
+    } catch { /* ignore — table might not exist yet */ }
+  }
+
+  private isSquelched(): boolean {
+    if (this.squelchedUntil <= 0) return false;
+    if (Date.now() < this.squelchedUntil) return true;
+    // Expired
+    this.squelchedUntil = 0;
+    return false;
+  }
+
   private async sendAlert(alert: HealthAlert): Promise<void> {
     if (!this.ctx) return;
+
+    // Squelch: suppress all alerts during maintenance window
+    if (this.isSquelched()) {
+      this.ctx.logger.debug('Alert squelched', { level: alert.level, message: alert.message });
+      return;
+    }
 
     // Cooldown: don't repeat the same alert key within cooldownMs
     const alertKey = `${alert.level}:${alert.message.slice(0, 50)}`;
@@ -270,8 +375,12 @@ export class ClusterHealthPlugin implements Plugin {
       alive: p.matchIndex > 0 || commitIndex === 0,
     }));
 
+    const squelched = this.squelchedUntil > 0 && Date.now() < this.squelchedUntil;
+
     return {
       timestamp: new Date().toISOString(),
+      alertsSquelched: squelched,
+      squelchedUntil: squelched ? new Date(this.squelchedUntil).toISOString() : null,
       leader: {
         nodeId: raft.getLeaderId(),
         isLeader: raft.isLeader(),

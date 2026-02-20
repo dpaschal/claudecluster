@@ -29,6 +29,15 @@ export class UpdaterPlugin implements Plugin {
           }
         };
 
+        // Build squelchFn: squelch/unsquelch health alerts
+        const squelchFn = async (minutes: number) => {
+          const tools = ctx.getTools?.();
+          const squelchTool = tools?.get('squelch_alerts');
+          if (squelchTool) {
+            await squelchTool.handler({ minutes });
+          }
+        };
+
         const updater = new RollingUpdater({
           membership: ctx.membership,
           raft: ctx.raft,
@@ -37,6 +46,7 @@ export class UpdaterPlugin implements Plugin {
           selfNodeId: ctx.nodeId,
           distDir,
           notifyFn,
+          squelchFn,
         });
 
         // Preflight first

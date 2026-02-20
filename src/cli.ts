@@ -122,6 +122,51 @@ export function registerCliCommands(program: Command): void {
       }
     });
 
+  // ── cortex squelch ───────────────────────────────────────
+  program
+    .command('squelch')
+    .argument('[minutes]', 'Minutes to squelch (0 to clear, default: 30)', '30')
+    .description('Suppress health alert notifications for maintenance')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .action(async (minutes: string, opts: any) => {
+      const mins = parseInt(minutes, 10);
+      if (isNaN(mins) || mins < 0) {
+        console.error(chalk.red('Minutes must be a non-negative number'));
+        process.exit(1);
+      }
+      const { pool, client } = await connectOrDie(opts.address);
+      try {
+        const untilMs = mins > 0 ? Date.now() + (mins * 60000) : 0;
+        const crypto = await import('crypto');
+        const sql = mins > 0
+          ? `INSERT OR REPLACE INTO timeline_context (key, value, category, label, source, pinned, updated_at) VALUES ('health_squelch_until', ?, 'system', 'Health Alert Squelch', 'cortex-cli', 0, datetime('now'))`
+          : `DELETE FROM timeline_context WHERE key = 'health_squelch_until'`;
+        const params = mins > 0 ? [String(untilMs)] : [];
+        const paramsJson = JSON.stringify(params);
+        const checksum = crypto.createHash('sha256').update(sql + paramsJson).digest('hex');
+
+        await client.forwardMemoryWrite({
+          sql,
+          params: paramsJson,
+          checksum,
+          classification: 'internal',
+          table: 'timeline_context',
+        });
+
+        if (mins > 0) {
+          const until = new Date(untilMs).toLocaleTimeString();
+          console.log(chalk.yellow(`🔇 Alerts squelched for ${mins} minutes (until ${until})`));
+        } else {
+          console.log(chalk.green(`🔔 Alerts unsquelched — notifications re-enabled`));
+        }
+      } catch (err: any) {
+        console.error(chalk.red(`Error: ${err.message}`));
+        process.exit(1);
+      } finally {
+        pool.closeAll();
+      }
+    });
+
   // ── cortex switch-leader ──────────────────────────────────
   program
     .command('switch-leader')
