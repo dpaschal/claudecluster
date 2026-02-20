@@ -648,13 +648,16 @@ describe('TaskStateMachine', () => {
       expect(action).toBeNull();
     });
 
-    it('returns null for workflow_submit stub', () => {
-      const action = sm.applyEntry('workflow_submit', {});
-      expect(action).toBeNull();
+    it('workflow_submit creates workflow and returns schedule action', () => {
+      const action = sm.applyEntry('workflow_submit', {
+        workflowId: 'wf-test',
+        definition: { name: 'test', tasks: { A: { type: 'shell', spec: { command: 'echo hi' } } } },
+      });
+      expect(action).toEqual({ type: 'schedule' });
     });
 
-    it('returns null for workflow_advance stub', () => {
-      const action = sm.applyEntry('workflow_advance', {});
+    it('workflow_advance returns null when nothing to advance', () => {
+      const action = sm.applyEntry('workflow_advance', { workflowId: 'nonexistent', completedTaskKey: 'x' });
       expect(action).toBeNull();
     });
   });
