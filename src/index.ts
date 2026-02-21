@@ -1126,7 +1126,13 @@ async function main(): Promise<void> {
 
   // If a subcommand was given, commander runs it and we're done.
   // Otherwise fall through to daemon startup.
-  const CLI_COMMANDS = ['status', 'switch-leader', 'squelch', 'deploy', 'test', 'help'];
+  const CLI_COMMANDS = [
+    'status', 'switch-leader', 'squelch', 'deploy', 'test',
+    'events', 'top', 'run', 'ssh', 'logs',
+    'drain', 'cordon', 'uncordon',
+    'tasks', 'snapshot', 'diag', 'config',
+    'help',
+  ];
   const firstArg = process.argv[2];
   if (firstArg && CLI_COMMANDS.includes(firstArg)) {
     await program.parseAsync(process.argv);

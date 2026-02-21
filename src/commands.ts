@@ -247,6 +247,256 @@ export function registerCliCommands(program: Command): void {
       process.exit(failed ? 1 : 0);
     });
 
+  // ── cortex events ──────────────────────────────────────
+  program
+    .command('events')
+    .description('Show cluster event history')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .option('--since <duration>', 'Time window (e.g. 1h, 30m, 7d)', '24h')
+    .option('-t, --type <type>', 'Filter by type (election, node_join, task_failed, etc.)')
+    .option('-n, --limit <count>', 'Max events to show', '50')
+    .action(async (opts) => {
+      const { runEvents } = await import('./cli/events.js');
+      await runEvents({
+        address: opts.address,
+        since: opts.since,
+        type: opts.type,
+        limit: parseInt(opts.limit, 10),
+      });
+    });
+
+  // ── cortex top ────────────────────────────────────────
+  program
+    .command('top')
+    .description('Live cluster resource dashboard')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .option('-1, --once', 'Print once and exit (no refresh)')
+    .option('-i, --interval <seconds>', 'Refresh interval', '2')
+    .action(async (opts) => {
+      const { runTop } = await import('./cli/top.js');
+      await runTop({
+        address: opts.address,
+        once: opts.once,
+        interval: parseInt(opts.interval, 10),
+      });
+    });
+
+  // ── cortex run ────────────────────────────────────────
+  program
+    .command('run')
+    .argument('<command>', 'Command to execute on nodes')
+    .description('Run a command across all cluster nodes')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .option('--nodes <list>', 'Comma-separated node names (default: all active)')
+    .option('--user <user>', 'SSH user', 'paschal')
+    .action(async (command: string, opts: any) => {
+      const { runRun } = await import('./cli/run.js');
+      await runRun({
+        address: opts.address,
+        nodes: opts.nodes,
+        user: opts.user,
+        command,
+      });
+    });
+
+  // ── cortex ssh ────────────────────────────────────────
+  program
+    .command('ssh')
+    .argument('<node>', 'Node name to SSH into')
+    .description('SSH into a cluster node by name')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .option('--user <user>', 'SSH user', 'paschal')
+    .action(async (nodeName: string, opts: any) => {
+      const { pool, client } = await connectOrDie(opts.address);
+      try {
+        const state = await client.getClusterState();
+        const nodes = state.nodes.filter((n: any) => !n.node_id.endsWith('-mcp'));
+        const target = nodes.find((n: any) => {
+          const sn = shortName(n.node_id).toLowerCase();
+          const hn = (n.hostname ?? '').toLowerCase();
+          return sn === nodeName.toLowerCase() || hn === nodeName.toLowerCase();
+        });
+        if (!target) {
+          console.error(chalk.red(`Node "${nodeName}" not found. Available: ${nodes.map((n: any) => shortName(n.node_id)).join(', ')}`));
+          process.exit(1);
+        }
+        pool.closeAll();
+        const { execSync } = await import('child_process');
+        execSync(`ssh -o StrictHostKeyChecking=no ${opts.user}@${target.tailscale_ip}`, { stdio: 'inherit' });
+      } catch (err: any) {
+        if (err.status !== undefined) process.exit(err.status); // SSH exit code
+        console.error(chalk.red(`Error: ${err.message}`));
+        process.exit(1);
+      } finally {
+        pool.closeAll();
+      }
+    });
+
+  // ── cortex logs ───────────────────────────────────────
+  program
+    .command('logs')
+    .argument('[node]', 'Node name (default: all nodes)')
+    .description('Tail cortex service logs from cluster nodes')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .option('-f, --follow', 'Follow log output')
+    .option('-n, --lines <count>', 'Number of lines to show', '50')
+    .option('--user <user>', 'SSH user', 'paschal')
+    .option('--grep <pattern>', 'Filter log lines by pattern')
+    .action(async (nodeName: string | undefined, opts: any) => {
+      const { runLogs } = await import('./cli/logs.js');
+      await runLogs({
+        address: opts.address,
+        follow: opts.follow,
+        lines: parseInt(opts.lines, 10),
+        node: nodeName,
+        user: opts.user,
+        grep: opts.grep,
+      });
+    });
+
+  // ── cortex drain ──────────────────────────────────────
+  program
+    .command('drain')
+    .argument('<node>', 'Node to drain tasks from')
+    .description('Drain all tasks from a node (reschedule to others)')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .action(async (nodeName: string, opts: any) => {
+      const { runDrain } = await import('./cli/node-ops.js');
+      await runDrain(nodeName, { address: opts.address });
+    });
+
+  // ── cortex cordon ─────────────────────────────────────
+  program
+    .command('cordon')
+    .argument('<node>', 'Node to cordon (disable scheduling)')
+    .description('Mark a node as unschedulable')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .action(async (nodeName: string, opts: any) => {
+      const { runCordon } = await import('./cli/node-ops.js');
+      await runCordon(nodeName, { address: opts.address });
+    });
+
+  // ── cortex uncordon ───────────────────────────────────
+  program
+    .command('uncordon')
+    .argument('<node>', 'Node to uncordon (re-enable scheduling)')
+    .description('Re-enable scheduling on a cordoned node')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .action(async (nodeName: string, opts: any) => {
+      const { runUncordon } = await import('./cli/node-ops.js');
+      await runUncordon(nodeName, { address: opts.address });
+    });
+
+  // ── cortex tasks ──────────────────────────────────────
+  {
+    const tasksCmd = program
+      .command('tasks')
+      .description('Task management (list, view, cancel)');
+
+    tasksCmd
+      .command('list')
+      .description('List tasks')
+      .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+      .option('--state <state>', 'Filter by state (queued, running, completed, failed)')
+      .option('-n, --limit <count>', 'Max tasks to show', '25')
+      .action(async (opts: any) => {
+        const { runTasksList } = await import('./cli/tasks.js');
+        await runTasksList({ address: opts.address, state: opts.state, limit: parseInt(opts.limit, 10) });
+      });
+
+    tasksCmd
+      .command('view')
+      .argument('<id>', 'Task ID')
+      .description('Show task details')
+      .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+      .action(async (taskId: string, opts: any) => {
+        const { runTasksView } = await import('./cli/tasks.js');
+        await runTasksView(taskId, { address: opts.address });
+      });
+
+    tasksCmd
+      .command('cancel')
+      .argument('<id>', 'Task ID')
+      .description('Cancel a running or queued task')
+      .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+      .action(async (taskId: string, opts: any) => {
+        const { runTasksCancel } = await import('./cli/tasks.js');
+        await runTasksCancel(taskId, { address: opts.address });
+      });
+  }
+
+  // ── cortex snapshot ───────────────────────────────────
+  {
+    const snapCmd = program
+      .command('snapshot')
+      .description('Manage shared memory snapshots');
+
+    snapCmd
+      .command('create')
+      .argument('[name]', 'Snapshot name (default: timestamped)')
+      .description('Create a snapshot of the shared memory database')
+      .action(async (name?: string) => {
+        const { runSnapshotCreate } = await import('./cli/snapshot.js');
+        await runSnapshotCreate(name);
+      });
+
+    snapCmd
+      .command('list')
+      .description('List available snapshots')
+      .action(async () => {
+        const { runSnapshotList } = await import('./cli/snapshot.js');
+        await runSnapshotList();
+      });
+
+    snapCmd
+      .command('restore')
+      .argument('<name>', 'Snapshot name or path')
+      .description('Restore shared memory from a snapshot')
+      .action(async (name: string) => {
+        const { runSnapshotRestore } = await import('./cli/snapshot.js');
+        await runSnapshotRestore(name);
+      });
+  }
+
+  // ── cortex diag ───────────────────────────────────────
+  program
+    .command('diag')
+    .description('Collect diagnostic bundle from all cluster nodes')
+    .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+    .option('-o, --output <path>', 'Output directory (default: /tmp/cortex-diag-<timestamp>)')
+    .option('--user <user>', 'SSH user', 'paschal')
+    .action(async (opts) => {
+      const { runDiag } = await import('./cli/diag.js');
+      await runDiag({ address: opts.address, output: opts.output, user: opts.user });
+    });
+
+  // ── cortex config ─────────────────────────────────────
+  {
+    const configCmd = program
+      .command('config')
+      .description('View and compare node configuration');
+
+    configCmd
+      .command('show')
+      .description('Show local node configuration')
+      .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+      .option('--user <user>', 'SSH user', 'paschal')
+      .action(async (opts: any) => {
+        const { runConfigShow } = await import('./cli/config.js');
+        await runConfigShow({ address: opts.address, user: opts.user });
+      });
+
+    configCmd
+      .command('diff')
+      .description('Compare configuration across all nodes')
+      .option('-a, --address <addr>', 'gRPC address', 'localhost:50051')
+      .option('--user <user>', 'SSH user', 'paschal')
+      .action(async (opts: any) => {
+        const { runConfigDiff } = await import('./cli/config.js');
+        await runConfigDiff({ address: opts.address, user: opts.user });
+      });
+  }
+
   // ── cortex deploy ───────────────────────────────────────
   program
     .command('deploy')
