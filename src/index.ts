@@ -1120,11 +1120,7 @@ async function main(): Promise<void> {
     .option('-s, --seed <address>', 'Seed node address to join cluster')
     .option('-v, --verbose', 'Enable verbose logging');
 
-  // Register CLI subcommands (status, deploy, test, etc.)
-  const { registerCliCommands } = await import('./commands.js');
-  registerCliCommands(program);
-
-  // If a subcommand was given, commander runs it and we're done.
+  // If a subcommand was given, register CLI commands and run them.
   // Otherwise fall through to daemon startup.
   const CLI_COMMANDS = [
     'status', 'switch-leader', 'squelch', 'deploy', 'test',
@@ -1134,7 +1130,10 @@ async function main(): Promise<void> {
     'help',
   ];
   const firstArg = process.argv[2];
-  if (firstArg && CLI_COMMANDS.includes(firstArg)) {
+  const wantsHelp = firstArg === '--help' || firstArg === '-h' || firstArg === 'help';
+  if (wantsHelp || (firstArg && CLI_COMMANDS.includes(firstArg))) {
+    const { registerCliCommands } = await import('./commands.js');
+    registerCliCommands(program);
     await program.parseAsync(process.argv);
     return;
   }
