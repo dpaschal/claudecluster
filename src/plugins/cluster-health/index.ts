@@ -30,6 +30,10 @@ export class ClusterHealthPlugin implements Plugin {
   private peerLastAlive: Map<string, number> = new Map(); // nodeId → timestamp when last seen alive
   private peerGracePeriodMs = 90000; // 90s grace — covers restart + rejoin + replication catch-up
 
+  // Track peers already reported offline — only alert on state transitions, not recurring conditions.
+  // Nodes going offline (laptop closed, machine powered off) is normal operation.
+  private alertedOfflinePeers: Set<string> = new Set();
+
   // Alert squelch: suppress all alerts until this timestamp
   private squelchedUntil = 0;
 
@@ -180,18 +184,38 @@ export class ClusterHealthPlugin implements Plugin {
       }
     }
 
-    // A peer is "unresponsive" if matchIndex is 0 AND commitIndex > 0 AND it wasn't recently alive
-    // This prevents alert spam during rolling restarts (peers temporarily have matchIndex=0 while restarting)
+    // Determine which peers are currently unresponsive (past grace period)
     const unresponsivePeers = peers.filter(p => {
       if (p.matchIndex > 0 || commitIndex === 0) return false;
       const lastAlive = this.peerLastAlive.get(p.nodeId) ?? 0;
       return (now - lastAlive) > this.peerGracePeriodMs;
     });
-    if (unresponsivePeers.length > 0) {
-      const names = unresponsivePeers.map(p => p.nodeId.split('-')[0]).join(', ');
+
+    // Detect peers that came BACK online — clear from alerted set, send recovery notice
+    for (const nodeId of this.alertedOfflinePeers) {
+      const peer = peers.find(p => p.nodeId === nodeId);
+      if (peer && peer.matchIndex > 0) {
+        this.alertedOfflinePeers.delete(nodeId);
+        const name = nodeId.split('-')[0];
+        alerts.push({
+          level: 'warning',
+          message: `Node recovered: ${name} is back online and replicating.`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Only alert for NEWLY offline peers (state transition: alive → unresponsive).
+    // Nodes going offline is normal (laptop closed, powered off) — alert once, don't repeat.
+    const newlyOffline = unresponsivePeers.filter(p => !this.alertedOfflinePeers.has(p.nodeId));
+    if (newlyOffline.length > 0) {
+      const names = newlyOffline.map(p => p.nodeId.split('-')[0]).join(', ');
+      for (const p of newlyOffline) {
+        this.alertedOfflinePeers.add(p.nodeId);
+      }
       alerts.push({
         level: 'warning',
-        message: `Unresponsive peers: ${names} (${unresponsivePeers.length}/${peers.length} not replicating)`,
+        message: `Node${newlyOffline.length > 1 ? 's' : ''} went offline: ${names} (${unresponsivePeers.length}/${peers.length} not replicating)`,
         timestamp: new Date().toISOString(),
       });
     }
