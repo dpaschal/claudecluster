@@ -45,6 +45,7 @@ service RaftService {
   rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
   rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
   rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
+  rpc TimeoutNow(TimeoutNowRequest) returns (TimeoutNowResponse);
 }
 
 // AgentService runs on each node for task execution
@@ -428,6 +429,15 @@ message InstallSnapshotRequest {
 
 message InstallSnapshotResponse {
   int64 term = 1;
+}
+
+message TimeoutNowRequest {
+  string from_leader_id = 1;
+  int64 term = 2;
+}
+
+message TimeoutNowResponse {
+  bool success = 1;
 }
 
 // ============================================================================

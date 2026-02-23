@@ -118,6 +118,10 @@ export class RaftNode extends EventEmitter {
     return this.state === 'leader';
   }
 
+  getNodeId(): string {
+    return this.config.nodeId;
+  }
+
   getCommitIndex(): number {
     return this.commitIndex;
   }
@@ -585,6 +589,31 @@ export class RaftNode extends EventEmitter {
       this.resetElectionTimeout();
     }
     this.config.logger.info('Elections resumed');
+  }
+
+  /**
+   * Immediately start an election, bypassing election timeout.
+   * Used by TimeoutNow RPC for targeted leadership transfer.
+   */
+  triggerImmediateElection(): boolean {
+    if (this.state === 'leader') {
+      this.config.logger.warn('triggerImmediateElection: already leader');
+      return false;
+    }
+    if (this.config.nonVoting) {
+      this.config.logger.warn('triggerImmediateElection: non-voting node');
+      return false;
+    }
+    this.config.logger.info('TimeoutNow received — starting immediate election');
+    this.clearElectionTimeout();
+    this.state = 'candidate';
+    this.currentTerm++;
+    this.votedFor = this.config.nodeId;
+    this.leaderId = null;
+    this.saveState();
+    this.emit('stateChange', 'candidate', this.currentTerm);
+    this.startElection();
+    return true;
   }
 
   /**

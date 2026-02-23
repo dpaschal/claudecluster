@@ -725,6 +725,7 @@ export class Cortex extends EventEmitter {
       stateManager: this.stateManager!,
       taskExecutor: this.taskExecutor!,
       resourceMonitor: this.resourceMonitor!,
+      clientPool: this.clientPool ?? undefined,
     };
 
     this.grpcServer!.registerServices({

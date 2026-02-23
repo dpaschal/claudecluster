@@ -214,7 +214,7 @@ export function registerCliCommands(program: Command): void {
         if (response.success) {
           console.log(chalk.green(`Done. ${response.message}`));
           if (name) {
-            console.log(chalk.dim(`(Raft election — ${name} may or may not win)`));
+            console.log(chalk.dim(`(TimeoutNow sent — ${name} should win the election)`));
           }
         } else {
           console.error(chalk.red(`Failed: ${response.message}`));

@@ -292,6 +292,10 @@ export class RaftClient {
   async installSnapshot(request: InstallSnapshotRequest): Promise<InstallSnapshotResponse> {
     return this.pool.call(this.client, 'InstallSnapshot', request, 60000);
   }
+
+  async timeoutNow(request: TimeoutNowRequest): Promise<TimeoutNowResponse> {
+    return this.pool.call(this.client, 'TimeoutNow', request, 2000);
+  }
 }
 
 export class AgentClient {
@@ -699,6 +703,15 @@ interface InstallSnapshotRequest {
 
 interface InstallSnapshotResponse {
   term: string;
+}
+
+interface TimeoutNowRequest {
+  from_leader_id: string;
+  term: string;
+}
+
+interface TimeoutNowResponse {
+  success: boolean;
 }
 
 interface ExecuteTaskRequest {

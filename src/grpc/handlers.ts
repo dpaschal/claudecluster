@@ -10,6 +10,7 @@ import { TaskScheduler } from '../cluster/scheduler.js';
 import { ClusterStateManager } from '../cluster/state.js';
 import { TaskExecutor } from '../agent/task-executor.js';
 import { ResourceMonitor } from '../agent/resource-monitor.js';
+import { GrpcClientPool, RaftClient } from './client.js';
 
 export interface ServiceHandlersConfig {
   logger: Logger;
@@ -21,6 +22,7 @@ export interface ServiceHandlersConfig {
   stateManager: ClusterStateManager;
   taskExecutor: TaskExecutor;
   resourceMonitor: ResourceMonitor;
+  clientPool?: GrpcClientPool;
 }
 
 export function createClusterServiceHandlers(config: ServiceHandlersConfig): grpc.UntypedServiceImplementation {
@@ -236,7 +238,7 @@ export function createClusterServiceHandlers(config: ServiceHandlersConfig): grp
       }
     },
 
-    // Transfer leadership (step down)
+    // Transfer leadership (step down, optionally targeted via TimeoutNow)
     TransferLeadership: async (
       call: grpc.ServerUnaryCall<any, any>,
       callback: grpc.sendUnaryData<any>
@@ -249,16 +251,53 @@ export function createClusterServiceHandlers(config: ServiceHandlersConfig): grp
           });
           return;
         }
+
+        const targetNodeId = call.request.target_node_id;
         const term = raft.getCurrentTerm();
-        const stepped = raft.stepDown();
-        if (stepped) {
-          logger.info('Leadership transfer: stepped down', { term });
+
+        if (targetNodeId && config.clientPool) {
+          // Targeted transfer: find the target peer and send TimeoutNow
+          const peers = raft.getPeers();
+          const target = peers.find(p =>
+            p.nodeId === targetNodeId ||
+            p.nodeId.startsWith(targetNodeId)
+          );
+          if (!target) {
+            callback(null, { success: false, message: `Target ${targetNodeId} not found in peers` });
+            return;
+          }
+
+          // Step down first
+          raft.stepDown();
+
+          // Send TimeoutNow to target — they start election immediately
+          try {
+            const client = new RaftClient(config.clientPool, target.address);
+            await client.timeoutNow({
+              from_leader_id: raft.getNodeId(),
+              term: term.toString(),
+            });
+            logger.info('TimeoutNow sent to target', { target: target.nodeId, term });
+          } catch (err) {
+            logger.warn('TimeoutNow delivery failed', { target: target.nodeId, error: err });
+          }
+
           callback(null, {
             success: true,
-            message: `Stepped down from term ${term}. New election in progress.`,
+            message: `Stepped down from term ${term}. TimeoutNow sent to ${target.nodeId}.`,
           });
         } else {
-          callback(null, { success: false, message: 'stepDown failed' });
+          // Generic step-down (no target)
+          const stepped = raft.stepDown();
+          if (stepped) {
+            logger.info('Leadership transfer: stepped down', { term });
+            callback(null, {
+              success: true,
+              message: `Stepped down from term ${term}. New election in progress.`,
+            });
+          } else {
+            callback(null, { success: false, message: 'stepDown failed' });
+          }
         }
       } catch (error) {
         logger.error('TransferLeadership failed', { error });
@@ -605,6 +644,37 @@ export function createRaftServiceHandlers(config: ServiceHandlersConfig): grpc.U
     ) => {
       logger.warn('InstallSnapshot not implemented');
       callback(null, { term: '0' });
+    },
+
+    TimeoutNow: async (
+      call: grpc.ServerUnaryCall<any, any>,
+      callback: grpc.sendUnaryData<any>
+    ) => {
+      try {
+        const request = call.request;
+        const fromTerm = parseInt(request.term);
+
+        logger.info('Received TimeoutNow', {
+          from: request.from_leader_id,
+          term: fromTerm,
+          myTerm: raft.getCurrentTerm(),
+        });
+
+        if (fromTerm < raft.getCurrentTerm()) {
+          logger.warn('TimeoutNow rejected: stale term', { fromTerm, myTerm: raft.getCurrentTerm() });
+          callback(null, { success: false });
+          return;
+        }
+
+        const triggered = raft.triggerImmediateElection();
+        callback(null, { success: triggered });
+      } catch (error) {
+        logger.error('TimeoutNow failed', { error });
+        callback({
+          code: grpc.status.INTERNAL,
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
     },
   };
 }
