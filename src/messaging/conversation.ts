@@ -89,6 +89,12 @@ export class ConversationHandler {
 
     await this.onTyping?.(chatId);
 
+    // Refresh typing indicator every 4 seconds while processing
+    const typingInterval = this.onTyping
+      ? setInterval(() => { this.onTyping!(chatId); }, 4000)
+      : undefined;
+
+    try {
     response = await this.provider.chat([...history], chatOptions);
 
     this.logger.info('LLM response', {
@@ -162,6 +168,10 @@ export class ConversationHandler {
     }
 
     return response.content;
+
+    } finally {
+      if (typingInterval) clearInterval(typingInterval);
+    }
   }
 
   clearHistory(chatId: string): void {

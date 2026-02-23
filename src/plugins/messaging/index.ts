@@ -28,8 +28,8 @@ const COMMAND_TOOL_MAP: Record<string, string> = {
 };
 
 /**
- * Format a tool result object into human-readable text for Telegram.
- * Extracts key fields and presents them as a clean summary rather than raw JSON.
+ * Format a tool result object into human-readable markdown for Telegram.
+ * Output is markdown — sendReply converts to Telegram HTML and escapes entities.
  */
 function formatToolResult(toolName: string, result: unknown): string {
   if (result === null || result === undefined) return 'No data returned.';
@@ -41,20 +41,18 @@ function formatToolResult(toolName: string, result: unknown): string {
   if (obj.error) return `Error: ${obj.error}`;
 
   try {
-    // For objects, build a readable summary
     const lines: string[] = [];
 
     const formatValue = (key: string, value: unknown, indent = ''): void => {
       if (value === null || value === undefined) return;
       if (Array.isArray(value)) {
         if (value.length === 0) {
-          lines.push(`${indent}<b>${key}:</b> (none)`);
+          lines.push(`${indent}**${key}:** (none)`);
           return;
         }
-        lines.push(`${indent}<b>${key}:</b>`);
+        lines.push(`${indent}**${key}:**`);
         for (const item of value) {
           if (typeof item === 'object' && item !== null) {
-            // Summarize object items on one line
             const itemObj = item as Record<string, unknown>;
             const parts = Object.entries(itemObj)
               .filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object')
@@ -66,12 +64,12 @@ function formatToolResult(toolName: string, result: unknown): string {
           }
         }
       } else if (typeof value === 'object') {
-        lines.push(`${indent}<b>${key}:</b>`);
+        lines.push(`${indent}**${key}:**`);
         for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
           formatValue(k, v, indent + '  ');
         }
       } else {
-        lines.push(`${indent}<b>${key}:</b> ${value}`);
+        lines.push(`${indent}**${key}:** ${value}`);
       }
     };
 
@@ -82,7 +80,7 @@ function formatToolResult(toolName: string, result: unknown): string {
     return lines.length > 0 ? lines.join('\n') : 'OK';
   } catch {
     // Fallback: return JSON with code formatting
-    return `<pre><code>${JSON.stringify(result, null, 2).slice(0, 3800)}</code></pre>`;
+    return '```json\n' + JSON.stringify(result, null, 2).slice(0, 3800) + '\n```';
   }
 }
 
@@ -222,7 +220,7 @@ export class MessagingPlugin implements Plugin {
       adapter.onCommand(command, async (chatId, _args) => {
         const tool = allTools.get(toolName);
         if (!tool) {
-          await this.sendReply(adapter, chatId, `Tool <code>${toolName}</code> not available.`);
+          await this.sendReply(adapter, chatId, `Tool \`${toolName}\` not available.`);
           return;
         }
         try {
@@ -273,7 +271,7 @@ export class MessagingPlugin implements Plugin {
     // /help — list all commands
     adapter.onCommand('help', async (chatId) => {
       const lines = COMMANDS.map(c => `/${c.command} — ${c.description}`);
-      const helpText = `<b>Available commands:</b>\n\n${lines.join('\n')}`;
+      const helpText = `**Available commands:**\n\n${lines.join('\n')}`;
       await this.sendReply(adapter, chatId, helpText);
     });
   }
