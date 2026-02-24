@@ -793,6 +793,13 @@ export class Cortex extends EventEmitter {
     this.membership.setRejoinInProgress(true);
     this.logger.info('Attempting cluster rejoin after connectivity loss');
 
+    // Close all cached gRPC channels — they're stale after cluster restarts.
+    // Without this, getConnection() returns dead cached channels and every
+    // RegisterNode call fails silently (the "14k heartbeat failures" bug).
+    if (this.clientPool) {
+      this.clientPool.closeAll();
+    }
+
     try {
       this.raft.pauseElections();
       await this.waitForNetworkReady();
