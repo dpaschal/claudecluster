@@ -842,7 +842,7 @@ export class Cortex extends EventEmitter {
       });
 
       this.logger.info('Auto-update complete, restarting cortex...');
-      execSync('systemctl restart cortex', { timeout: 10000, stdio: 'pipe' });
+      execSync('sudo systemctl restart cortex', { timeout: 10000, stdio: 'pipe' });
     } catch (error) {
       this.logger.error('Auto-update failed', { error });
       // Don't crash — continue running with old code, manual intervention needed
