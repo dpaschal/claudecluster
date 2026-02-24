@@ -833,11 +833,21 @@ export class Cortex extends EventEmitter {
 
     const leaderIp = leaderAddress.split(':')[0];
     const distDir = __dirname;  // __dirname is dist/ when running compiled code
+    const projectDir = path.join(distDir, '..');  // project root (parent of dist/)
+    const sshOpts = `-e 'ssh -o StrictHostKeyChecking=no'`;
 
     try {
       const { execSync } = require('child_process');
-      execSync(`rsync -az --delete ${leaderIp}:${distDir}/ ${distDir}/`, {
+
+      // Rsync dist/ from leader
+      execSync(`rsync -az --delete ${sshOpts} ${leaderIp}:${distDir}/ ${distDir}/`, {
         timeout: 60000,
+        stdio: 'pipe',
+      });
+
+      // Also rsync proto/ (loaded at runtime from outside dist/)
+      execSync(`rsync -az --delete ${sshOpts} ${leaderIp}:${projectDir}/proto/ ${projectDir}/proto/`, {
+        timeout: 30000,
         stdio: 'pipe',
       });
 
