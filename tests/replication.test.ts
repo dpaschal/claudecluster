@@ -35,6 +35,7 @@ describe('MemoryReplicator', () => {
 
     mockMembership = {
       getLeaderAddress: vi.fn().mockReturnValue('100.94.211.117:50051'),
+      getNode: vi.fn().mockReturnValue(null),
       getSelfNodeId: vi.fn().mockReturnValue('test-node'),
     };
 
@@ -98,6 +99,7 @@ describe('MemoryReplicator', () => {
   describe('write path (follower)', () => {
     it('returns error when no leader available', async () => {
       mockRaft.getState.mockReturnValue('follower');
+      mockRaft.getLeaderId.mockReturnValue(null);
       mockMembership.getLeaderAddress.mockReturnValue(null);
 
       const result = await replicator.write(

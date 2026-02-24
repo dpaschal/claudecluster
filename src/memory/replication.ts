@@ -126,6 +126,28 @@ export class MemoryReplicator {
     }
   }
 
+  /**
+   * Resolve the current leader address.
+   * Primary: membership.getLeaderAddress() (cached from AppendEntries/join).
+   * Fallback: query raft.getLeaderId() + membership.getNode() to build address.
+   */
+  private resolveLeaderAddress(): string | null {
+    // Try cached leader address first
+    const cached = this.membership.getLeaderAddress();
+    if (cached) return cached;
+
+    // Fallback: derive from raft leader ID + membership node info
+    const leaderId = this.raft.getLeaderId();
+    if (!leaderId) return null;
+
+    const leaderNode = this.membership.getNode(leaderId);
+    if (leaderNode?.tailscaleIp && leaderNode?.grpcPort) {
+      return `${leaderNode.tailscaleIp}:${leaderNode.grpcPort}`;
+    }
+
+    return null;
+  }
+
   private async forwardToLeader(
     sql: string,
     params: unknown[],
@@ -133,29 +155,62 @@ export class MemoryReplicator {
     classification?: Classification,
     table?: string,
   ): Promise<WriteResult> {
-    const leaderAddr = this.membership.getLeaderAddress();
-    if (!leaderAddr) {
-      return { success: false, error: 'No leader available to forward write' };
+    const maxRetries = 3;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const leaderAddr = this.resolveLeaderAddress();
+      if (!leaderAddr) {
+        // No leader ID at all — no point retrying
+        if (!this.raft.getLeaderId()) {
+          return { success: false, error: 'No leader available to forward write' };
+        }
+        // Leader ID exists but can't resolve address — transient, retry
+        if (attempt < maxRetries - 1) {
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          continue;
+        }
+        return { success: false, error: 'No leader available to forward write' };
+      }
+
+      try {
+        const client = new ClusterClient(this.clientPool, leaderAddr);
+        const response = await client.forwardMemoryWrite({
+          sql,
+          params: JSON.stringify(params),
+          checksum,
+          classification: classification ?? '',
+          table: table ?? '',
+        });
+
+        if (response.success) {
+          return { success: true };
+        }
+
+        // "Not the leader" — cached address is stale. Flush and retry.
+        if (response.error === 'Not the leader') {
+          this.logger.warn('Forward got "Not the leader", flushing stale channel', {
+            staleAddr: leaderAddr,
+            attempt: attempt + 1,
+          });
+          this.clientPool.closeConnection(leaderAddr);
+          await new Promise(r => setTimeout(r, 1000));
+          continue;
+        }
+
+        return { success: false, error: response.error || undefined };
+      } catch (error) {
+        this.logger.error('Forward to leader failed', { error, leaderAddr, attempt: attempt + 1 });
+        // Flush the dead channel so next attempt creates a fresh one
+        this.clientPool.closeConnection(leaderAddr);
+        if (attempt < maxRetries - 1) {
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          continue;
+        }
+        return { success: false, error: error instanceof Error ? error.message : 'Forward failed' };
+      }
     }
 
-    try {
-      const client = new ClusterClient(this.clientPool, leaderAddr);
-      const response = await client.forwardMemoryWrite({
-        sql,
-        params: JSON.stringify(params),
-        checksum,
-        classification: classification ?? '',
-        table: table ?? '',
-      });
-
-      return {
-        success: response.success,
-        error: response.error || undefined,
-      };
-    } catch (error) {
-      this.logger.error('Forward to leader failed', { error, leaderAddr });
-      return { success: false, error: error instanceof Error ? error.message : 'Forward failed' };
-    }
+    return { success: false, error: 'Forward to leader failed after retries' };
   }
 
   // ================================================================
