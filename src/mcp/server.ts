@@ -121,6 +121,20 @@ export class ClusterMcpServer {
     this.config.logger.info('MCP server started', { tools: this.config.tools.size, resources: this.config.resources.size });
   }
 
+  /**
+   * Update tools and resources after lazy initialization.
+   * Handlers read from the Maps by reference at call time, so newly added
+   * entries are visible immediately without reconnecting the transport.
+   */
+  updateToolsAndResources(tools: Map<string, ToolHandler>, resources: Map<string, ResourceHandler>): void {
+    for (const [name, handler] of tools) {
+      this.config.tools.set(name, handler);
+    }
+    for (const [uri, handler] of resources) {
+      this.config.resources.set(uri, handler);
+    }
+  }
+
   async stop(): Promise<void> {
     await this.server.close();
     this.config.logger.info('MCP server stopped');

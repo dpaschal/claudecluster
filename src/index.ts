@@ -299,6 +299,19 @@ export class Cortex extends EventEmitter {
     });
 
     try {
+      // In MCP mode, connect stdio transport IMMEDIATELY so Claude Code's
+      // initialize handshake completes before heavy initialization (~1.2s).
+      // Tools are empty initially; populated after plugins load.
+      if (this.mcpMode) {
+        this.mcpServer = new ClusterMcpServer({
+          logger: this.logger,
+          tools: new Map(),
+          resources: new Map(),
+        });
+        await this.mcpServer.start();
+        this.logger.info('MCP stdio transport connected (tools loading in background)');
+      }
+
       // Initialize security
       await this.initializeSecurity();
 
@@ -329,8 +342,15 @@ export class Cortex extends EventEmitter {
       });
 
       if (this.mcpMode) {
-        // In MCP mode, start serving immediately — cluster joins in background
-        await this.initializeMcp();
+        // Populate MCP server with loaded tools/resources
+        this.mcpServer!.updateToolsAndResources(
+          this.pluginLoader!.getAllTools(),
+          this.pluginLoader!.getAllResources(),
+        );
+        this.logger.info('MCP tools loaded', {
+          tools: this.pluginLoader!.getAllTools().size,
+          resources: this.pluginLoader!.getAllResources().size,
+        });
         this.running = true;
         this.logger.info('MCP server ready, joining cluster in background');
         this.emit('started');
@@ -1078,6 +1098,9 @@ export class Cortex extends EventEmitter {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  /** Initialize MCP server for non-MCP (daemon) mode only.
+   *  In MCP mode, the transport is connected early in start() and tools
+   *  are populated lazily — this method is not called. */
   private async initializeMcp(): Promise<void> {
     this.mcpServer = new ClusterMcpServer({
       logger: this.logger,
@@ -1089,11 +1112,6 @@ export class Cortex extends EventEmitter {
       tools: this.pluginLoader!.getAllTools().size,
       resources: this.pluginLoader!.getAllResources().size,
     });
-
-    if (this.mcpMode) {
-      this.logger.info('Starting MCP server in stdio mode');
-      await this.mcpServer.start();
-    }
   }
 
   private resolvePath(p: string): string {
@@ -1152,18 +1170,41 @@ async function runMcpServer(config: ClusterConfig, options: { seed?: string; ver
     isolated: false,
   };
 
+  // Diagnostics: catch silent crashes in MCP process
+  const logFile = config.logging.file ?? '/tmp/cortex-mcp.log';
+  const fsModule = await import('fs');
+  const diagLog = (msg: string) => {
+    try { fsModule.appendFileSync(logFile, JSON.stringify({ level: 'error', message: msg, timestamp: new Date().toISOString() }) + '\n'); } catch {}
+  };
+
   // Create cluster with file-only logging
   const cluster = new Cortex(config, { mcpMode: true });
 
   // Handle shutdown
   process.on('SIGINT', async () => {
+    diagLog('Received SIGINT');
     await cluster.stop();
     process.exit(0);
   });
 
   process.on('SIGTERM', async () => {
+    diagLog('Received SIGTERM');
     await cluster.stop();
     process.exit(0);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    diagLog(`Unhandled rejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+  });
+  process.on('uncaughtException', (err) => {
+    diagLog(`Uncaught exception: ${err.stack}`);
+  });
+  process.on('exit', (code) => {
+    diagLog(`MCP process exiting with code ${code}`);
+  });
+
+  process.stdin.on('close', () => {
+    diagLog('stdin closed (Claude Code disconnected)');
   });
 
   // Start cluster (will start MCP server with stdio)

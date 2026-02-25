@@ -381,57 +381,127 @@ export class ClusterHealthPlugin implements Plugin {
     const velocity = this.getTermVelocity();
     const peers = raft.getPeers();
     const commitIndex = raft.getCommitIndex();
+    const isLeader = raft.isLeader();
+    const squelched = this.squelchedUntil > 0 && Date.now() < this.squelchedUntil;
 
-    // Raft-based liveness: matchIndex > 0 means peer has replicated
-    const alivePeers = peers.filter(p => p.matchIndex > 0);
-    const unresponsivePeers = peers.filter(p => p.matchIndex === 0 && commitIndex > 0);
-    const votingPeers = peers.filter(p => p.votingMember);
-    const totalVoting = votingPeers.length + 1; // +1 for self
-    const aliveVoting = alivePeers.filter(p => p.votingMember).length + 1;
-    const quorumNeeded = Math.floor(totalVoting / 2) + 1;
+    const leaderInfo = {
+      nodeId: raft.getLeaderId(),
+      isLeader,
+      term: raft.getCurrentTerm(),
+      state: raft.getState(),
+    };
 
-    // Replication status
-    const replication = peers.map(p => ({
-      nodeId: p.nodeId,
-      matchIndex: p.matchIndex,
-      lag: commitIndex - p.matchIndex,
-      voting: p.votingMember,
-      alive: p.matchIndex > 0 || commitIndex === 0,
+    const termVelocityInfo = {
+      elections: velocity.elections,
+      windowMinutes: Math.round(velocity.windowMs / 60000),
+      electionsPerMinute: parseFloat(velocity.termsPerMin.toFixed(2)),
+      threshold: this.termVelocityThreshold,
+      status: velocity.elections >= this.termVelocityThreshold ? 'UNSTABLE' : 'STABLE',
+    };
+
+    // On the leader, matchIndex is authoritative for peer liveness.
+    // On followers, matchIndex is always 0 (never updated) — use membership status instead.
+    if (isLeader) {
+      const alivePeers = peers.filter(p => p.matchIndex > 0);
+      const unresponsivePeers = peers.filter(p => p.matchIndex === 0 && commitIndex > 0);
+      const votingPeers = peers.filter(p => p.votingMember);
+      const totalVoting = votingPeers.length + 1; // +1 for self
+      const aliveVoting = alivePeers.filter(p => p.votingMember).length + 1;
+      const quorumNeeded = Math.floor(totalVoting / 2) + 1;
+
+      const replication = peers.map(p => ({
+        nodeId: p.nodeId,
+        matchIndex: p.matchIndex,
+        lag: commitIndex - p.matchIndex,
+        voting: p.votingMember,
+        alive: p.matchIndex > 0 || commitIndex === 0,
+      }));
+
+      return {
+        timestamp: new Date().toISOString(),
+        perspective: 'leader',
+        alertsSquelched: squelched,
+        squelchedUntil: squelched ? new Date(this.squelchedUntil).toISOString() : null,
+        leader: leaderInfo,
+        termVelocity: termVelocityInfo,
+        peers: {
+          total: peers.length,
+          alive: alivePeers.length,
+          unresponsive: unresponsivePeers.length,
+          unresponsiveNames: unresponsivePeers.map(p => p.nodeId),
+        },
+        replication,
+        quorum: {
+          votingMembers: totalVoting,
+          aliveVoting,
+          needed: quorumNeeded,
+          healthy: aliveVoting >= quorumNeeded,
+        },
+        overallStatus: this.computeOverallStatus(velocity, unresponsivePeers.length, aliveVoting, quorumNeeded),
+      };
+    }
+
+    // Follower perspective: use membership status + leader heartbeat reception
+    const now = Date.now();
+    const lastHeartbeat = raft.getLastAppendEntriesAt();
+    const heartbeatAgeMs = lastHeartbeat > 0 ? now - lastHeartbeat : -1;
+    const leaderAlive = heartbeatAgeMs >= 0 && heartbeatAgeMs < 5000; // 5s threshold (heartbeats every ~500ms)
+
+    const allNodes = membership.getAllNodes();
+    const selfId = raft.getNodeId();
+    const leaderId = raft.getLeaderId();
+    const peerNodes = allNodes.filter(n => n.nodeId !== selfId);
+
+    // On a follower we can only confirm the leader is alive (we receive its heartbeats).
+    // Other followers' status comes from membership (which may be incomplete on followers).
+    // Key insight: if we're receiving heartbeats from the leader, the leader HAS quorum
+    // (otherwise it would have stepped down). So leader alive ≈ quorum healthy.
+    const peerStatus = peerNodes.map(n => ({
+      nodeId: n.nodeId,
+      hostname: n.hostname,
+      status: n.status,
+      role: n.nodeId === leaderId ? 'leader' : 'follower',
+      alive: n.nodeId === leaderId ? leaderAlive : n.status === 'active',
     }));
 
-    const squelched = this.squelchedUntil > 0 && Date.now() < this.squelchedUntil;
+    const alivePeerCount = peerStatus.filter(p => p.alive).length;
+    const votingPeers = peers.filter(p => p.votingMember);
+    const totalVoting = votingPeers.length + 1; // +1 for self
+    const quorumNeeded = Math.floor(totalVoting / 2) + 1;
+
+    // On a follower, quorum is inferred: if the leader is actively sending heartbeats,
+    // it must have quorum (Raft leaders step down without majority). Don't try to count
+    // alive voters from incomplete membership data.
+    const quorumHealthy = leaderAlive;
 
     return {
       timestamp: new Date().toISOString(),
+      perspective: 'follower',
       alertsSquelched: squelched,
       squelchedUntil: squelched ? new Date(this.squelchedUntil).toISOString() : null,
-      leader: {
-        nodeId: raft.getLeaderId(),
-        isLeader: raft.isLeader(),
-        term: raft.getCurrentTerm(),
-        state: raft.getState(),
+      leader: leaderInfo,
+      leaderHeartbeat: {
+        lastReceivedMs: heartbeatAgeMs,
+        alive: leaderAlive,
       },
-      termVelocity: {
-        elections: velocity.elections,
-        windowMinutes: Math.round(velocity.windowMs / 60000),
-        electionsPerMinute: parseFloat(velocity.termsPerMin.toFixed(2)),
-        threshold: this.termVelocityThreshold,
-        status: velocity.elections >= this.termVelocityThreshold ? 'UNSTABLE' : 'STABLE',
-      },
+      termVelocity: termVelocityInfo,
       peers: {
-        total: peers.length,
-        alive: alivePeers.length,
-        unresponsive: unresponsivePeers.length,
-        unresponsiveNames: unresponsivePeers.map(p => p.nodeId),
+        total: votingPeers.length,
+        knownAlive: alivePeerCount,
+        note: 'Follower has partial peer visibility. Leader alive implies quorum.',
       },
-      replication,
+      peerStatus,
       quorum: {
         votingMembers: totalVoting,
-        aliveVoting,
         needed: quorumNeeded,
-        healthy: aliveVoting >= quorumNeeded,
+        healthy: quorumHealthy,
+        note: leaderAlive
+          ? 'Leader is sending heartbeats — quorum is held.'
+          : 'No heartbeat from leader — quorum status unknown.',
       },
-      overallStatus: this.computeOverallStatus(velocity, unresponsivePeers.length, aliveVoting, quorumNeeded),
+      overallStatus: leaderAlive
+        ? (velocity.elections >= this.termVelocityThreshold ? 'CRITICAL' : 'HEALTHY')
+        : 'CRITICAL',
     };
   }
 

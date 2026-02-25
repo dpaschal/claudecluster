@@ -64,6 +64,9 @@ export class RaftNode extends EventEmitter {
   private leaderId: string | null = null;
   private peers: Map<string, PeerInfo> = new Map();
 
+  // Follower state: track when we last received a valid AppendEntries from the leader
+  private lastAppendEntriesAt = 0;
+
   // Timers
   private electionTimeout: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
@@ -132,6 +135,10 @@ export class RaftNode extends EventEmitter {
 
   getLastLogTerm(): number {
     return this.log.length > 0 ? this.log[this.log.length - 1].term : 0;
+  }
+
+  getLastAppendEntriesAt(): number {
+    return this.lastAppendEntriesAt;
   }
 
   // Peer management
@@ -277,6 +284,7 @@ export class RaftNode extends EventEmitter {
     // Valid AppendEntries from leader
     const previousLeaderId = this.leaderId;
     this.leaderId = request.leaderId;
+    this.lastAppendEntriesAt = Date.now();
     this.resetElectionTimeout();
 
     // Notify membership manager when leader changes

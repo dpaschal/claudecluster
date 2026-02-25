@@ -42,7 +42,7 @@
     "@grpc/grpc-js": "^1.14.0",
     "@grpc/proto-loader": "^0.7.0",
     "@kubernetes/client-node": "^1.4.0",
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@types/pg": "^8.16.0",
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.6.2",
